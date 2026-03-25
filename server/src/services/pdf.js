@@ -43,9 +43,13 @@ function findUploadedFile(files, field) {
   return (Array.isArray(files) ? files : []).find((file) => String(file?.field || "") === String(field || ""));
 }
 
-function renderUploadedSignatureCard(doc, files, field, title = "Principal Applicant Signature") {
+function renderUploadedSignatureCard(doc, files, field, title = "Principal Applicant Signature", opts = {}) {
   const file = findUploadedFile(files, field);
   if (!file?.path) return;
+
+  if (opts?.omitPreviewImages !== false) {
+    return;
+  }
 
   const localPath = path.resolve(process.cwd(), `.${file.path}`);
   if (!fs.existsSync(localPath)) return;
@@ -579,7 +583,7 @@ function renderLocalIndividualClientRegistration(doc, data, opts = {}) {
   };
 
   renderPersonBlock('Principal Applicant', v.principal || {});
-  renderUploadedSignatureCard(doc, opts.files, 'principalSig', 'Principal Applicant Signature');
+  renderUploadedSignatureCard(doc, opts.files, 'principalSig', 'Principal Applicant Signature', { omitPreviewImages: true });
   renderPersonBlock('Joint Applicant', v.jointApplicant || {}, holders[1].enabled);
   renderPersonBlock('Second Joint Applicant', v.secondJointApplicant || {}, holders[2].enabled);
   renderPersonBlock('Investment Decision', v.investmentDecision || {});
