@@ -1723,8 +1723,8 @@ const steps = useMemo(
   const [authorizerSignaturePreviewUrl, setAuthorizerSignaturePreviewUrl] = useState("");
   const [witness1SignaturePreviewUrl, setWitness1SignaturePreviewUrl] = useState("");
   const [witness2SignaturePreviewUrl, setWitness2SignaturePreviewUrl] = useState("");
-  const [witness1SignaturePreviewUrl, setWitness1SignaturePreviewUrl] = useState("");
-  const [witness2SignaturePreviewUrl, setWitness2SignaturePreviewUrl] = useState("");
+  // const [witness1SignaturePreviewUrl, setWitness1SignaturePreviewUrl] = useState("");
+  // const [witness2SignaturePreviewUrl, setWitness2SignaturePreviewUrl] = useState("");
   // Local Individual (Client Registration) uploads
 
   const resolveExistingUploadPreviewUrl = (field) => {
