@@ -1,7 +1,8 @@
 // Prefer same-origin requests so the Vite dev server can proxy `/api` to the backend.
 // This avoids CORS + port mismatch issues (a common cause of "Failed to fetch").
 // You can still override with VITE_API_BASE for production deployments.
-const API_BASE = import.meta.env.VITE_API_BASE || "";
+// const API_BASE = import.meta.env.VITE_API_BASE || "";
+const API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE || "";
 
 function getAuthToken() {
   try { return localStorage.getItem("stoxiq_token"); } catch { return null; }
