@@ -6,10 +6,10 @@ import react from "@vitejs/plugin-react";
 // port isn't 5000 (e.g., when 5000 is already in use).
 //
 // You can change the target by creating `client/.env` with:
-//   VITE_API_PROXY_TARGET=http://localhost:5000
+//   VITE_API_PROXY_TARGET=http://ashasecurity-v5k5.onrender.com
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const proxyTarget = env.VITE_API_PROXY_TARGET || "http://localhost:5000";
+  const proxyTarget = env.VITE_API_PROXY_TARGET || "http://ashasecurity-v5k5.onrender.com";
 
   return {
     plugins: [react()],

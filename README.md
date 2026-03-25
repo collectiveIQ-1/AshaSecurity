@@ -27,8 +27,8 @@ cp client/.env.example client/.env
 npm run dev
 ```
 
-Client: http://localhost:5173  
-Server: http://localhost:5000/health
+Client: http://ashasecurity.netlify.app 
+Server: http://ashasecurity-v5k5.onrender.com/health
 
 ## 2) MongoDB
 Put your MongoDB connection string in `server/.env`:

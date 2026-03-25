@@ -10,7 +10,7 @@ function req(name, fallback = undefined) {
 export const env = {
   NODE_ENV: process.env.NODE_ENV || "development",
   PORT: Number(process.env.PORT || 5000),
-  CORS_ORIGIN: process.env.CORS_ORIGIN || "http://localhost:5173",
+  CORS_ORIGIN: process.env.CORS_ORIGIN || "http://ashasecurity.netlify.app",
   MONGODB_URI: req("MONGODB_URI", "mongodb://127.0.0.1:27017/smartportal"),
   // Auth DB (separate database/collection for users)
   AUTH_MONGODB_URI: process.env.AUTH_MONGODB_URI || "",

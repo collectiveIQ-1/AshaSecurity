@@ -107,7 +107,7 @@ router.post("/forgot-password", async (req, res) => {
     user.resetTokenExpiresAt = expires;
     await user.save();
 
-    const base = env.PUBLIC_WEB_BASE || env.CORS_ORIGIN || "http://localhost:5173";
+    const base = env.PUBLIC_WEB_BASE || env.CORS_ORIGIN || "http://ashasecurity.netlify.app";
     const link = `${base.replace(/\/$/, "")}/reset-password/${token}`;
 
     if (env.EMAIL_ENABLED === true || env.EMAIL_ENABLED === "true") {
