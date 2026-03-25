@@ -69,10 +69,7 @@ function buildPreviewSnapshot(root, options = {}) {
   const formVariant = options.formVariant || "";
   const isForeignIndividualPreview = formVariant === "foreign_individual";
   const isLocalIndividualPreview = formVariant === "local_individual";
-  const isLocalCorporatePreview = formVariant === "local_corporate";
-  const isForeignCorporatePreview = formVariant === "foreign_corporate";
   const isIndividualPreview = isLocalIndividualPreview || isForeignIndividualPreview;
-  const isCorporatePreview = isLocalCorporatePreview || isForeignCorporatePreview;
 
   const originalControls = root.querySelectorAll("input, textarea, select");
   const cloneControls = clone.querySelectorAll("input, textarea, select");
@@ -81,7 +78,7 @@ function buildPreviewSnapshot(root, options = {}) {
     if (!imageUrl) return null;
 
     const wrap = doc.createElement("div");
-    wrap.className = "mt-4 w-full min-w-0 md:col-span-2";
+    wrap.className = "mt-4 md:col-span-2";
     wrap.innerHTML = `
       <div class="group overflow-hidden rounded-[30px] border border-zinc-200/90 bg-gradient-to-br from-white via-zinc-50 to-zinc-100 shadow-[0_16px_40px_rgba(15,23,42,0.08)] transition">
         <div class="relative border-b border-zinc-200/80 px-5 py-4">
@@ -121,7 +118,7 @@ function buildPreviewSnapshot(root, options = {}) {
     };
 
     const wrap = doc.createElement("div");
-    wrap.className = "mt-4 w-full min-w-0 md:col-span-2";
+    wrap.className = "mt-4 md:col-span-2";
     wrap.innerHTML = `
       <div class="group overflow-hidden rounded-[30px] border border-zinc-200/90 bg-gradient-to-br from-white via-zinc-50 to-zinc-100 shadow-[0_16px_40px_rgba(15,23,42,0.08)] transition">
         <div class="relative border-b border-zinc-200/80 px-5 py-4">
@@ -148,7 +145,7 @@ function buildPreviewSnapshot(root, options = {}) {
     if (!visibleItems.length) return null;
 
     const wrap = doc.createElement("div");
-    wrap.className = "mt-4 w-full min-w-0 md:col-span-2";
+    wrap.className = "mt-4 md:col-span-2";
     wrap.innerHTML = `
       <div class="group overflow-hidden rounded-[30px] border border-zinc-200/90 bg-gradient-to-br from-white via-zinc-50 to-zinc-100 shadow-[0_16px_40px_rgba(15,23,42,0.08)] transition">
         <div class="relative border-b border-zinc-200/80 px-5 py-4">
@@ -237,8 +234,7 @@ function buildPreviewSnapshot(root, options = {}) {
     const officeCard = field?.closest('.rounded-3xl');
     if (officeCard) {
       const wrapper = clone.ownerDocument.createElement('div');
-      wrapper.className = 'mt-4 w-full min-w-0';
-      stabilizePreviewInsertionParent(officeCard, wrapper);
+      wrapper.className = 'mt-4';
       wrapper.appendChild(node);
       officeCard.appendChild(wrapper);
       return true;
@@ -254,12 +250,9 @@ function buildPreviewSnapshot(root, options = {}) {
     const remarksParent = remarksCard?.parentNode;
 
     if (remarksCard && remarksParent) {
-      const wrapper = clone.ownerDocument.createElement('div');
-      wrapper.className = 'mt-3 w-full min-w-0';
-      wrapper.setAttribute('data-preview-advisor-signature', 'foreign-individual');
-      stabilizePreviewInsertionParent(remarksParent, wrapper);
-      wrapper.appendChild(node);
-      remarksParent.insertBefore(wrapper, remarksCard);
+      node.className = 'mt-3';
+      node.setAttribute('data-preview-advisor-signature', 'foreign-individual');
+      remarksParent.insertBefore(node, remarksCard);
       return true;
     }
 
@@ -323,31 +316,6 @@ function buildPreviewSnapshot(root, options = {}) {
   const previewImageMap = options.previewImageMap || {};
   const normalizeText = (value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
 
-  const stabilizePreviewInsertionParent = (parent, wrapper) => {
-    if (!parent || !wrapper) return;
-
-    wrapper.classList.add("w-full", "min-w-0", "max-w-full", "block");
-    wrapper.style.width = "100%";
-    wrapper.style.maxWidth = "100%";
-    wrapper.style.clear = "both";
-
-    const parentClassName = String(parent.className || "");
-    const hasFlexLayout = /(^|\s)flex(\s|$)/.test(parentClassName);
-    const hasGridLayout = /(^|\s)grid(\s|$)/.test(parentClassName);
-    const isFlexColumn = /flex-col/.test(parentClassName);
-
-    if (hasFlexLayout && !isFlexColumn) {
-      if (parent.classList?.add) parent.classList.add("flex-wrap", "items-start");
-      wrapper.classList.add("basis-full");
-      wrapper.style.flexBasis = "100%";
-    }
-
-    if (hasGridLayout) {
-      wrapper.classList.add("col-span-full", "md:col-span-full");
-      wrapper.style.gridColumn = "1 / -1";
-    }
-  };
-
   const insertBeforeDeclarationSection = (node) => {
     if (!node) return false;
 
@@ -362,9 +330,8 @@ function buildPreviewSnapshot(root, options = {}) {
     if (!anchor?.parentNode) return false;
 
     const wrapper = clone.ownerDocument.createElement("div");
-    wrapper.className = "mb-5 w-full min-w-0 md:col-span-2";
+    wrapper.className = "mb-5 md:col-span-2";
     wrapper.setAttribute("data-preview-advisor-before-declaration", "true");
-    stabilizePreviewInsertionParent(anchor.parentNode, wrapper);
     wrapper.appendChild(node);
     anchor.parentNode.insertBefore(wrapper, anchor);
     return true;
@@ -374,23 +341,14 @@ function buildPreviewSnapshot(root, options = {}) {
     if (!node || !headingNeedles.length) return false;
 
     const nodes = Array.from(clone.querySelectorAll("h1, h2, h3, h4, h5, h6, div, span, p"));
-    const normalizedNeedles = headingNeedles.map((needle) => normalizeText(needle));
-    const matchingNodes = nodes.filter((el) => {
+    const headingNode = nodes.find((el) => {
       const text = normalizeText(el.textContent);
-      return normalizedNeedles.some((needle) => text.includes(needle));
+      return headingNeedles.some((needle) => text.includes(normalizeText(needle)));
     });
 
-    if (!matchingNodes.length) return false;
+    if (!headingNode) return false;
 
-    const exactMatch = matchingNodes.find((el) => {
-      const text = normalizeText(el.textContent);
-      return normalizedNeedles.some((needle) => text === needle);
-    });
-
-    const headingNode = exactMatch
-      || matchingNodes.sort((a, b) => normalizeText(a.textContent).length - normalizeText(b.textContent).length)[0];
-
-    const anchor = headingNode.closest(options.closestSelector || ".rounded-3xl, .rounded-2xl, .rounded-xl, section, article")
+    const anchor = headingNode.closest(options.closestSelector || "section, article, .rounded-3xl")
       || headingNode.parentElement
       || headingNode;
 
@@ -401,7 +359,6 @@ function buildPreviewSnapshot(root, options = {}) {
     if (options.dataAttribute) {
       wrapper.setAttribute(options.dataAttribute, "true");
     }
-    stabilizePreviewInsertionParent(anchor.parentNode, wrapper);
     wrapper.appendChild(node);
     anchor.parentNode.insertBefore(wrapper, anchor);
     return true;
@@ -411,7 +368,7 @@ function buildPreviewSnapshot(root, options = {}) {
   if (localIndividualPrincipalSignature) {
     const signatureWrap = createSignaturePreviewCard(clone.ownerDocument, {
       badge: "Principal Applicant",
-      title: "Principal Applicant Signature Preview",
+      title: "Signature Preview",
       helper: "Uploaded signature shown here for review only.",
       imageUrl: localIndividualPrincipalSignature,
       alt: "Principal applicant signature preview",
@@ -431,8 +388,8 @@ function buildPreviewSnapshot(root, options = {}) {
   if (jointApplicantSignature) {
     const jointSignatureCard = createSignaturePreviewCard(clone.ownerDocument, {
       badge: "Joint Applicant",
-      title: "Joint 1 Signature Preview",
-      helper: "Uploaded signature shown here for review only.",
+      title: "Signature Preview",
+      helper: "This uploaded signature is echoed here to make the applicant review area more polished and easier to scan.",
       imageUrl: jointApplicantSignature,
       alt: "Joint applicant signature preview",
     });
@@ -445,8 +402,8 @@ function buildPreviewSnapshot(root, options = {}) {
   if (secondJointApplicantSignature) {
     const secondJointSignatureCard = createSignaturePreviewCard(clone.ownerDocument, {
       badge: "2nd Joint Applicant",
-      title: "Joint 2 Signature Preview",
-      helper: "Uploaded signature shown here for review only.",
+      title: "Signature Preview",
+      helper: "Placed right after the applicant details so the preview feels complete without changing the actual form layout.",
       imageUrl: secondJointApplicantSignature,
       alt: "2nd joint applicant signature preview",
     });
@@ -461,107 +418,12 @@ function buildPreviewSnapshot(root, options = {}) {
   const witness1Signature = previewImageMap.witness1Signature || "";
   const witness2Signature = previewImageMap.witness2Signature || "";
   const companySealSignature = previewImageMap.companySealSignature || authorizerSignature || "";
-  const corporateDirector1Signature = previewImageMap.corporateDirector1Signature || "";
-  const corporateDirector2Signature = previewImageMap.corporateDirector2Signature || "";
-  const corporateAgentSignature = previewImageMap.corporateAgentSignature || "";
-  const corporateAuthorizerSignature = previewImageMap.corporateAuthorizerSignature || "";
-  const corporateAdvisorSignature = previewImageMap.corporateAdvisorSignature || advisorSignature || "";
-  const corporateStockbrokerFirmSignature = previewImageMap.corporateStockbrokerFirmSignature || corporateAdvisorSignature || "";
-  const corporateWitness1Signature = previewImageMap.corporateWitness1Signature || witness1Signature || "";
-  const corporateWitness2Signature = previewImageMap.corporateWitness2Signature || witness2Signature || "";
-  const corporateCompanySealSignature = previewImageMap.corporateCompanySealSignature || companySealSignature || "";
-  const corporatePrincipalApplicantSignature = previewImageMap.corporatePrincipalApplicantSignature || previewImageMap.localIndividualPrincipalSignature || "";
-  const corporateJointApplicantSignature = previewImageMap.corporateJointApplicantSignature || jointApplicantSignature || "";
 
-  if (isCorporatePreview && (corporateDirector1Signature || corporateDirector2Signature || corporateCompanySealSignature)) {
-    const corporateUploadSignatureCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
-      badge: "Document Signature Review",
-      title: "Director & Company Seal Signatures",
-      helper: "Uploaded signatures shown here for review only.",
-      items: [
-        {
-          label: "Director 1",
-          imageUrl: corporateDirector1Signature,
-          alt: "Director 1 signature preview before Upload the memorandum of articles",
-        },
-        {
-          label: "Director 2",
-          imageUrl: corporateDirector2Signature,
-          alt: "Director 2 signature preview before Upload the memorandum of articles",
-        },
-        {
-          label: "Company Seal",
-          imageUrl: corporateCompanySealSignature,
-          alt: "Company seal preview before Upload the memorandum of articles",
-        },
-      ],
-    });
-
-    if (corporateUploadSignatureCard) {
-      insertBeforeTextHeading(corporateUploadSignatureCard, ["Upload the memorandum of articles"], {
-        wrapperClassName: "mt-5 mb-6 md:col-span-2",
-        dataAttribute: "data-preview-corporate-upload-signatures",
-        closestSelector: ".rounded-3xl, .rounded-2xl, .rounded-xl, section, article",
-      });
-    }
-  }
-
-  if (isCorporatePreview && (corporateDirector1Signature || corporateDirector2Signature || corporateAgentSignature || corporateAdvisorSignature || corporateAuthorizerSignature)) {
-    const corporateDeclarationSignatureCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
-      badge: "Client Registration Signature Review",
-      title: "Director, Agent, Advisor & Authorizer Signatures",
-      helper: "Uploaded signatures shown here for review only.",
-      items: [
-        {
-          label: "Director 1",
-          imageUrl: corporateDirector1Signature,
-          alt: "Director 1 signature preview before Declaration",
-        },
-        {
-          label: "Director 2",
-          imageUrl: corporateDirector2Signature,
-          alt: "Director 2 signature preview before Declaration",
-        },
-        {
-          label: "Agent",
-          imageUrl: corporateAgentSignature,
-          alt: "Agent signature preview before Declaration",
-        },
-        {
-          label: "Advisor",
-          imageUrl: corporateAdvisorSignature,
-          alt: "Advisor signature preview before Declaration",
-        },
-        {
-          label: "Authorizer",
-          imageUrl: corporateAuthorizerSignature,
-          alt: "Authorizer signature preview before Declaration",
-        },
-      ],
-    });
-
-    if (corporateDeclarationSignatureCard) {
-      const insertedCorporateDeclarationCard = insertBeforeTextHeading(corporateDeclarationSignatureCard, ["Declaration by the staff", "Declaration"], {
-        wrapperClassName: "mt-5 mb-6 md:col-span-2",
-        dataAttribute: "data-preview-corporate-declaration-signatures",
-        closestSelector: ".rounded-3xl, .rounded-2xl, .rounded-xl, section, article",
-      });
-
-      if (!insertedCorporateDeclarationCard) {
-        insertBeforeTextHeading(corporateDeclarationSignatureCard, ["ASHA SECURITIES LIMITED"], {
-          wrapperClassName: "mt-5 mb-6 md:col-span-2",
-          dataAttribute: "data-preview-corporate-declaration-signatures",
-          closestSelector: ".rounded-3xl, .rounded-2xl, .rounded-xl, section, article",
-        });
-      }
-    }
-  }
-
-  if ((isLocalIndividualPreview || isForeignIndividualPreview) && (clientSignature || authorizerSignature || witness1Signature || witness2Signature)) {
-    const privacySignatureCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
-      badge: "Consent Signature Review",
+  if (isIndividualPreview) {
+    const privacyNoticeSignatureCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
+      badge: "Privacy Notice Review",
       title: "Client, Authorizer & Witness Signatures",
-      helper: "Uploaded signature shown here for review only.",
+      helper: "Shown only in preview, just before the Privacy Notice & Data Collection Consent Clause, so the final review section looks polished and easy to verify.",
       items: [
         {
           label: "Client",
@@ -586,270 +448,25 @@ function buildPreviewSnapshot(root, options = {}) {
       ],
     });
 
-    if (privacySignatureCard) {
-      insertBeforeTextHeading(privacySignatureCard, ["Privacy Notice & Data Collection Consent Clause"], {
-        wrapperClassName: "mt-5 mb-6 md:col-span-2",
-        dataAttribute: "data-preview-privacy-signatures",
-        closestSelector: ".rounded-3xl, .rounded-2xl, section, article",
+    if (privacyNoticeSignatureCard) {
+      const insertedBeforePrivacyNotice = insertBeforeTextHeading(privacyNoticeSignatureCard, ["Privacy Notice & Data Collection Consent Clause"], {
+        wrapperClassName: "mt-4 mb-6 md:col-span-2",
+        dataAttribute: "data-preview-privacy-notice-signatures",
       });
-    }
-  }
 
-
-  if (isCorporatePreview && (clientSignature || corporateCompanySealSignature || corporateWitness1Signature || corporateWitness2Signature)) {
-    const corporatePrivacySignatureCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
-      badge: "Consent Signature Review",
-      title: "Client, Company Seal & Witness Signatures",
-      helper: "Uploaded signatures shown here for review only.",
-      items: [
-        {
-          label: "Client",
-          imageUrl: clientSignature,
-          alt: "Client signature preview before privacy notice",
-        },
-        {
-          label: "Company Seal",
-          imageUrl: corporateCompanySealSignature,
-          alt: "Company seal preview before privacy notice",
-        },
-        {
-          label: "Witness 1",
-          imageUrl: corporateWitness1Signature,
-          alt: "Witness 1 signature preview before privacy notice",
-        },
-        {
-          label: "Witness 2",
-          imageUrl: corporateWitness2Signature,
-          alt: "Witness 2 signature preview before privacy notice",
-        },
-      ],
-    });
-
-    if (corporatePrivacySignatureCard) {
-      insertBeforeTextHeading(corporatePrivacySignatureCard, ["Privacy Notice & Data Collection Consent Clause"], {
-        wrapperClassName: "mt-5 mb-6 md:col-span-2",
-        dataAttribute: "data-preview-corporate-privacy-signatures",
-        closestSelector: ".rounded-3xl, .rounded-2xl, .rounded-xl, section, article",
-      });
-    }
-  }
-
-  if (isCorporatePreview && (corporateAdvisorSignature || corporateAuthorizerSignature)) {
-    const corporateClientAgreementSignatureCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
-      badge: "KYC Signature Review",
-      title: "Advisor & Authorizer Signatures",
-      helper: "Uploaded signatures shown here for review only.",
-      items: [
-        {
-          label: "Advisor",
-          imageUrl: corporateAdvisorSignature,
-          alt: "Advisor signature preview before Client Agreement",
-        },
-        {
-          label: "Authorizer",
-          imageUrl: corporateAuthorizerSignature,
-          alt: "Authorizer signature preview before Client Agreement",
-        },
-      ],
-    });
-
-    if (corporateClientAgreementSignatureCard) {
-      insertBeforeTextHeading(corporateClientAgreementSignatureCard, ["CLIENT AGREEMENT", "Client Agreement"], {
-        wrapperClassName: "mt-5 mb-6 md:col-span-2",
-        dataAttribute: "data-preview-corporate-client-agreement-signatures",
-        closestSelector: ".rounded-3xl, .rounded-2xl, .rounded-xl, section, article",
-      });
-    }
-  }
-
-  if (isCorporatePreview && corporateStockbrokerFirmSignature) {
-    const corporateSchedule2SignatureCard = createSignaturePreviewCard(clone.ownerDocument, {
-      badge: "Schedule 1 Signature Review",
-      title: "Stockbroker Firm Signature",
-      helper: "Uploaded signatures shown here for review only.",
-      imageUrl: corporateStockbrokerFirmSignature,
-      alt: "Stockbroker Firm signature preview before Schedule 2",
-    });
-
-    if (corporateSchedule2SignatureCard) {
-      insertBeforeTextHeading(corporateSchedule2SignatureCard, ["SCHEDULE 2", "Schedule 2", "ACKNOWLEDGEMENT", "Acknowledgement"], {
-        wrapperClassName: "mt-5 mb-6 md:col-span-2",
-        dataAttribute: "data-preview-corporate-schedule2-stockbroker-signature",
-        closestSelector: ".rounded-3xl, .rounded-2xl, .rounded-xl, section, article",
-      });
-    }
-  }
-
-  if (isCorporatePreview && clientSignature) {
-    const corporateBeneficialOwnershipSignatureCard = createSignaturePreviewCard(clone.ownerDocument, {
-      badge: "Schedule 2 Review",
-      title: "Client Signature",
-      helper: "Uploaded signatures shown here for review only.",
-      imageUrl: clientSignature,
-      alt: "Client signature preview before Beneficial Ownership Form",
-    });
-
-    if (corporateBeneficialOwnershipSignatureCard) {
-      insertBeforeTextHeading(corporateBeneficialOwnershipSignatureCard, ["Beneficial Ownership Form", "BENEFICIAL OWNERSHIP FORM", "APPENDIX I - Beneficial Ownership Form"], {
-        wrapperClassName: "mt-5 mb-6 md:col-span-2",
-        dataAttribute: "data-preview-corporate-beneficial-ownership-client-signature",
-        closestSelector: ".rounded-3xl, .rounded-2xl, .rounded-xl, section, article",
-      });
-    }
-  }
-
-  if (isCorporatePreview && corporateAuthorizerSignature) {
-    const localCorporateAuthorizedCustomerDobPath = "clientRegistration.beneficialOwnershipForm.authorizedCustomer.dob";
-    const foreignCorporateAuthorizedCustomerDobPath = "fcClientRegistration.beneficialOwnershipForm.authorizedCustomer.dob";
-    const localCorporateAfiOfficialDatePath = "clientRegistration.beneficialOwnershipForm.afiOfficial.date";
-    const foreignCorporateAfiOfficialDatePath = "fcClientRegistration.beneficialOwnershipForm.afiOfficial.date";
-
-    const authorizedCustomerDobPath = isLocalCorporatePreview
-      ? localCorporateAuthorizedCustomerDobPath
-      : isForeignCorporatePreview
-      ? foreignCorporateAuthorizedCustomerDobPath
-      : "";
-
-    const afiOfficialDatePath = isLocalCorporatePreview
-      ? localCorporateAfiOfficialDatePath
-      : isForeignCorporatePreview
-      ? foreignCorporateAfiOfficialDatePath
-      : "";
-
-    const createCorporateAuthorizerSignatureCard = (alt) => createSignaturePreviewCard(clone.ownerDocument, {
-      badge: "Beneficial Ownership Review",
-      title: "Authorizer Signature",
-      helper: "Uploaded signatures shown here for review only.",
-      imageUrl: corporateAuthorizerSignature,
-      alt,
-    });
-
-    const authorizerSignatureAfterDobCard = createCorporateAuthorizerSignatureCard(
-      "Authorizer signature preview after authorized customer date of birth"
-    );
-
-    if (authorizerSignatureAfterDobCard) {
-      const insertedAfterAuthorizedCustomerDob = authorizedCustomerDobPath
-        ? insertAfterFieldBlockPath(authorizedCustomerDobPath, authorizerSignatureAfterDobCard)
-        : false;
-
-      if (!insertedAfterAuthorizedCustomerDob) {
-        insertBeforeTextHeading(authorizerSignatureAfterDobCard, ["Verification of Beneficial Ownership"], {
-          wrapperClassName: "mt-5 mb-6 md:col-span-2",
-          dataAttribute: "data-preview-corporate-beneficial-ownership-authorizer-signature-after-dob",
-          closestSelector: ".rounded-3xl, .rounded-2xl, .rounded-xl, section, article",
-        });
+      if (!insertedBeforePrivacyNotice) {
+        const finalPrivacyWrapper = clone.ownerDocument.createElement("section");
+        finalPrivacyWrapper.className = "mt-6 w-full";
+        finalPrivacyWrapper.setAttribute("data-preview-privacy-notice-signatures-fallback", "true");
+        finalPrivacyWrapper.appendChild(privacyNoticeSignatureCard);
+        clone.appendChild(finalPrivacyWrapper);
       }
     }
 
-    const authorizerSignatureAfterAfiDateCard = createCorporateAuthorizerSignatureCard(
-      "Authorizer signature preview after authorized financial institution official date"
-    );
-
-    if (authorizerSignatureAfterAfiDateCard) {
-      const insertedAfterAfiDate = afiOfficialDatePath
-        ? insertAfterFieldBlockPath(afiOfficialDatePath, authorizerSignatureAfterAfiDateCard)
-        : false;
-
-      if (!insertedAfterAfiDate) {
-        insertBeforeTextHeading(authorizerSignatureAfterAfiDateCard, ["Politically exposed person", "Politically exposed person*"], {
-          wrapperClassName: "mt-5 mb-6 md:col-span-2",
-          dataAttribute: "data-preview-corporate-beneficial-ownership-authorizer-signature-after-afi-date",
-          closestSelector: ".rounded-3xl, .rounded-2xl, .rounded-xl, section, article",
-        });
-      }
-    }
-  }
-
-
-  if (isCorporatePreview && (corporatePrincipalApplicantSignature || corporateJointApplicantSignature || corporateAdvisorSignature || corporateWitness1Signature || corporateWitness2Signature)) {
-    const corporateAdditionalRequirementsSignatureCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
-      badge: "Signatures Review",
-      title: "Principal Applicant, Joint Applicant, Advisor & Witness Signatures",
-      helper: "Uploaded signatures shown here for review only.",
-      items: [
-        {
-          label: "Principal Applicant",
-          imageUrl: corporatePrincipalApplicantSignature,
-          alt: "Principal applicant signature preview before Additional Requirements",
-        },
-        {
-          label: "Joint Applicant",
-          imageUrl: corporateJointApplicantSignature,
-          alt: "Joint applicant signature preview before Additional Requirements",
-        },
-        {
-          label: "Advisor",
-          imageUrl: corporateAdvisorSignature,
-          alt: "Advisor signature preview before Additional Requirements",
-        },
-        {
-          label: "Witness 1",
-          imageUrl: corporateWitness1Signature,
-          alt: "Witness 1 signature preview before Additional Requirements",
-        },
-        {
-          label: "Witness 2",
-          imageUrl: corporateWitness2Signature,
-          alt: "Witness 2 signature preview before Additional Requirements",
-        },
-      ],
-    });
-
-    if (corporateAdditionalRequirementsSignatureCard) {
-      insertBeforeTextHeading(corporateAdditionalRequirementsSignatureCard, ["Additional Requirements"], {
-        wrapperClassName: "mt-5 mb-6 md:col-span-2",
-        dataAttribute: "data-preview-corporate-additional-requirements-signatures",
-        closestSelector: ".rounded-3xl, .rounded-2xl, .rounded-xl, section, article",
-      });
-    }
-  }
-
-
-  if (isCorporatePreview && (clientSignature || corporateStockbrokerFirmSignature || corporateWitness1Signature || corporateWitness2Signature)) {
-    const corporateCreditFacilitySignatureCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
-      badge: "Client Agreement Signature Review",
-      title: "Client, Stockbroker Firm & Witness Signatures",
-      helper: "Uploaded signatures shown here for review only.",
-      items: [
-        {
-          label: "Client",
-          imageUrl: clientSignature,
-          alt: "Client signature preview before Agreement - Credit Facility",
-        },
-        {
-          label: "Stockbroker Firm",
-          imageUrl: corporateStockbrokerFirmSignature,
-          alt: "Stockbroker Firm signature preview before Agreement - Credit Facility",
-        },
-        {
-          label: "Witness 1",
-          imageUrl: corporateWitness1Signature,
-          alt: "Witness 1 signature preview before Agreement - Credit Facility",
-        },
-        {
-          label: "Witness 2",
-          imageUrl: corporateWitness2Signature,
-          alt: "Witness 2 signature preview before Agreement - Credit Facility",
-        },
-      ],
-    });
-
-    if (corporateCreditFacilitySignatureCard) {
-      insertBeforeTextHeading(corporateCreditFacilitySignatureCard, ["AGREEMENT - CREDIT FACILITY", "Agreement - Credit Facility"], {
-        wrapperClassName: "mt-5 mb-6 md:col-span-2",
-        dataAttribute: "data-preview-corporate-credit-facility-signatures",
-        closestSelector: ".rounded-3xl, .rounded-2xl, .rounded-xl, section, article",
-      });
-    }
-  }
-
-
-  if (isIndividualPreview) {
     const declarationServicesSignatureCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
       badge: "Declaration Review",
       title: "Applicant Signatures",
-      helper: "Uploaded signature shown here for review only.",
+      helper: "Shown only in preview, right after the services-provided note, so the declaration area looks cleaner and easier to review.",
       items: [
         {
           label: "Principal Applicant",
@@ -866,6 +483,11 @@ function buildPreviewSnapshot(root, options = {}) {
           imageUrl: secondJointApplicantSignature,
           alt: "2nd joint applicant signature preview",
         },
+        {
+          label: "Authorizer",
+          imageUrl: authorizerSignature,
+          alt: "Authorizer signature preview",
+        },
       ],
     });
 
@@ -874,7 +496,6 @@ function buildPreviewSnapshot(root, options = {}) {
         ? insertBeforeTextHeading(declarationServicesSignatureCard, ["Remarks:"], {
             wrapperClassName: "mt-4 mb-4 md:col-span-2",
             dataAttribute: "data-preview-services-signatures",
-            closestSelector: ".rounded-2xl, .rounded-xl, section, article, .rounded-3xl",
           })
         : isForeignIndividualPreview
           ? insertBeforeTextHeading(declarationServicesSignatureCard, ["Know Your Customer (KYC) Profile"], {
@@ -906,66 +527,13 @@ function buildPreviewSnapshot(root, options = {}) {
     }
   }
 
-  if (isIndividualPreview && (clientSignature || localIndividualPrincipalSignature || jointApplicantSignature || secondJointApplicantSignature || advisorSignature || witness1Signature || witness2Signature)) {
-    const uploadSectionSignatureCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
-      badge: "Signature Summary",
-      title: "Signature Review",
-      helper: "Uploaded signature shown here for review only.",
-      items: [
-        {
-          label: "Client",
-          imageUrl: clientSignature,
-          alt: "Client signature preview before Upload the Signatures",
-        },
-        {
-          label: "Principal Applicant",
-          imageUrl: localIndividualPrincipalSignature,
-          alt: "Principal applicant signature preview before Upload the Signatures",
-        },
-        {
-          label: "Joint 1",
-          imageUrl: jointApplicantSignature,
-          alt: "Joint 1 signature preview before Upload the Signatures",
-        },
-        {
-          label: "Joint 2",
-          imageUrl: secondJointApplicantSignature,
-          alt: "Joint 2 signature preview before Upload the Signatures",
-        },
-        {
-          label: "Advisor",
-          imageUrl: advisorSignature,
-          alt: "Advisor signature preview before Upload the Signatures",
-        },
-        {
-          label: "Witness 1",
-          imageUrl: witness1Signature,
-          alt: "Witness 1 signature preview before Upload the Signatures",
-        },
-        {
-          label: "Witness 2",
-          imageUrl: witness2Signature,
-          alt: "Witness 2 signature preview before Upload the Signatures",
-        },
-      ],
-    });
-
-    if (uploadSectionSignatureCard) {
-      insertBeforeTextHeading(uploadSectionSignatureCard, ["Upload the Signatures"], {
-        wrapperClassName: isLocalIndividualPreview ? "mt-5 mb-6" : "mt-5 mb-6 md:col-span-2",
-        dataAttribute: "data-preview-upload-signatures-summary",
-        closestSelector: ".rounded-3xl, .rounded-2xl, .rounded-xl, section, article",
-      });
-    }
-  }
-
   if (isIndividualPreview && advisorSignature) {
     const advisorRegistrationCard = createSignaturePreviewCard(clone.ownerDocument, {
       badge: "Client Registration",
       title: "Advisor Signature Preview",
       helper: isForeignIndividualPreview
-        ? "Uploaded signature shown here for review only."
-        : "Uploaded signature shown here for review only.",
+        ? "Displayed only in preview, neatly between Advisor's Name and the Remarks section, for a cleaner office-use review flow."
+        : "Displayed only in preview, neatly between Advisor's Name and Client Declaration & Authorization, for a cleaner office-use review flow.",
       imageUrl: advisorSignature,
       alt: "Advisor signature preview after advisor name",
     });
@@ -986,7 +554,7 @@ function buildPreviewSnapshot(root, options = {}) {
     const schedule1SignatureCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
       badge: "Schedule 1 Signature Review",
       title: "Client, Company Seal & Witness Signatures",
-      helper: "Uploaded signature shown here for review only.",
+      helper: "Displayed only in preview, neatly before the SCHEDULE 1 main section so the agreement flow looks cleaner and more polished.",
       items: [
         {
           label: "Client",
@@ -1056,68 +624,125 @@ function buildPreviewSnapshot(root, options = {}) {
     }
   }
 
-  if ((isLocalIndividualPreview || isForeignIndividualPreview) && (clientSignature || advisorSignature || authorizerSignature)) {
-    const kycSignatureCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
-      badge: "KYC Signature Review",
-      title: "Client, Advisor & Authorizer Signatures",
-      helper: "Uploaded signature shown here for review only.",
-      items: [
-        {
-          label: "Client",
-          imageUrl: clientSignature,
-          alt: "Client signature preview",
-        },
-        {
-          label: "Advisor",
-          imageUrl: advisorSignature,
-          alt: "Advisor signature preview",
-        },
-        {
-          label: "Authorizer",
-          imageUrl: authorizerSignature,
-          alt: "Authorizer signature preview",
-        },
-      ],
+  if (clientSignature || advisorSignature) {
+    const declarationSignatureCard = createDualSignaturePreviewCard(clone.ownerDocument, {
+      badge: isForeignIndividualPreview ? "Final Preview" : "Declaration by the Staff",
+      title: "Client & Advisor Signatures",
+      helper: isForeignIndividualPreview
+        ? "These uploaded signatures are displayed at the very end of the foreign individual preview so the full review reads in a cleaner, more polished top-to-bottom flow."
+        : "These uploaded signatures are echoed here right after the declaration note so the preview feels cleaner, more complete, and easier to review.",
+      left: {
+        label: "Client Signature",
+        imageUrl: clientSignature,
+        alt: "Client signature preview",
+        emptyText: "Client signature not uploaded",
+      },
+      right: {
+        label: "Advisor Signature",
+        imageUrl: advisorSignature,
+        alt: "Advisor signature preview",
+        emptyText: "Advisor signature not uploaded",
+      },
     });
 
-    const insertKycCardBeforeClientAgreement = () => {
-      if (!kycSignatureCard) return false;
+    if (isForeignIndividualPreview && declarationSignatureCard) {
+      declarationSignatureCard.className = `w-full ${declarationSignatureCard.className || ""}`.trim();
 
-      const agreementHeadings = Array.from(clone.querySelectorAll('div, span, p, h1, h2, h3, h4, h5, h6'));
-      const agreementHeading = agreementHeadings.find((node) => normalizeText(node.textContent) === 'client agreement');
-      const agreementCard = agreementHeading?.closest('.rounded-3xl, .rounded-2xl, section, article') || agreementHeading?.parentElement;
-      const agreementParent = agreementCard?.parentNode;
+      const foreignInstructionField = clone.querySelector('[data-path="fiClientRegistration.authorizedInstructions.nameAndAddress"]');
+      const instructionFieldShell = foreignInstructionField?.closest('.space-y-2')
+        || foreignInstructionField?.parentElement;
+      const instructionParent = instructionFieldShell?.parentNode;
 
-      if (agreementCard && agreementParent) {
+      if (instructionFieldShell && instructionParent) {
         const wrapper = clone.ownerDocument.createElement('div');
-        wrapper.className = isLocalIndividualPreview ? 'mt-5 mb-6' : 'mt-5 mb-6 md:col-span-2';
-        wrapper.setAttribute('data-preview-kyc-signatures', formVariant || 'individual');
-        wrapper.appendChild(kycSignatureCard);
-        agreementParent.insertBefore(wrapper, agreementCard);
-        return true;
+        wrapper.className = 'mb-4 md:col-span-2';
+        wrapper.setAttribute('data-preview-foreign-signatures', 'true');
+        wrapper.appendChild(declarationSignatureCard);
+        instructionParent.insertBefore(wrapper, instructionFieldShell);
+      } else {
+        const finalSection = clone.ownerDocument.createElement('section');
+        finalSection.className = 'mt-8 w-full';
+        finalSection.setAttribute('data-preview-signature-tail', 'true');
+
+        const divider = clone.ownerDocument.createElement('div');
+        divider.className = 'mb-4 h-px w-full bg-gradient-to-r from-transparent via-zinc-300 to-transparent';
+
+        finalSection.appendChild(divider);
+        finalSection.appendChild(declarationSignatureCard);
+        clone.appendChild(finalSection);
       }
 
-      const remarksField = clone.querySelector('[data-path="clientRegistration.kycProfile.otherRemarksNotes"], [data-path="fiClientRegistration.kyc.otherRemarks"]');
-      const remarksSection = remarksField?.closest('.rounded-3xl, .rounded-2xl, section, article');
-      const remarksParent = remarksSection?.parentNode;
-      if (remarksSection && remarksParent) {
-        const wrapper = clone.ownerDocument.createElement('div');
-        wrapper.className = 'mt-4';
-        wrapper.setAttribute('data-preview-kyc-signatures', formVariant || 'individual');
-        wrapper.appendChild(kycSignatureCard);
-        remarksParent.insertBefore(wrapper, remarksSection.nextSibling || null);
+      return clone.innerHTML;
+    }
+
+    const normalizedDeclarationNeedles = [
+      "investment advisor on behalf of the asha security ltd has clearly explained the risk disclosure statement to the client while inviting to the client to the read and ask question and take independent advice if the client wishes.",
+      "(investment advisor) on behalf of the asha securities ltd has clearly explained the risk disclosure statement to the client while inviting the client to read and ask questions and take independent advice if the client wishes.",
+    ];
+    const declarationNodes = Array.from(clone.querySelectorAll("p, div, span"));
+
+    const insertDeclarationCardAfterNote = (anchorPath) => {
+      const anchorField = clone.querySelector(`[data-path="${anchorPath}"]`);
+      if (!anchorField) return false;
+
+      const candidateScopes = [
+        anchorField.closest(".rounded-3xl"),
+        anchorField.closest("section"),
+        anchorField.closest("article"),
+        anchorField.parentElement,
+      ].filter(Boolean);
+
+      for (const scope of candidateScopes) {
+        const scopedNodes = Array.from(scope.querySelectorAll("p, div, span"));
+        const noteNode = scopedNodes.find((node) => {
+          const text = normalizeText(node.textContent);
+          return normalizedDeclarationNeedles.some((needle) => text.includes(needle));
+        });
+
+        if (!noteNode) continue;
+
+        const noteRow = noteNode.closest(".grid") || noteNode;
+        const insertionParent = noteRow.parentNode;
+        if (!insertionParent) continue;
+
+        const wrapper = clone.ownerDocument.createElement("div");
+        wrapper.className = "mt-4 md:col-span-2 lg:col-span-2";
+        wrapper.appendChild(declarationSignatureCard);
+        insertionParent.insertBefore(wrapper, noteRow.nextSibling || null);
         return true;
       }
 
       return false;
     };
 
-    if (!insertKycCardBeforeClientAgreement() && kycSignatureCard) {
-      const finalSection = clone.ownerDocument.createElement('section');
-      finalSection.className = 'mt-8 w-full';
-      finalSection.setAttribute('data-preview-signature-tail', 'true');
-      finalSection.appendChild(kycSignatureCard);
-      clone.appendChild(finalSection);
+    const insertedAfterScopedDeclaration = insertDeclarationCardAfterNote("clientRegistration.staffDeclaration.advisorName")
+      || insertDeclarationCardAfterNote("declaration.staffName");
+
+    if (!insertedAfterScopedDeclaration && declarationSignatureCard) {
+      const declarationTextNode = declarationNodes.find((node) => {
+        const text = normalizeText(node.textContent);
+        return normalizedDeclarationNeedles.some((needle) => text.includes(needle));
+      });
+
+      if (declarationTextNode?.parentNode) {
+        const declarationElement = declarationTextNode.nodeType === 1 ? declarationTextNode : declarationTextNode.parentElement;
+        const declarationParent = declarationElement?.parentElement;
+        const parentClasses = String(declarationParent?.className || "");
+        const elementClasses = String(declarationElement?.className || "");
+        const parentLooksLikeGrid = /grid|grid-cols|gap-/.test(parentClasses);
+        const elementAlreadySpansRow = /col-span/.test(elementClasses);
+
+        if (declarationElement && declarationParent && parentLooksLikeGrid && !elementAlreadySpansRow) {
+          const wrapper = clone.ownerDocument.createElement("div");
+          wrapper.className = "mt-3 md:col-span-2 lg:col-span-2";
+
+          declarationParent.insertBefore(wrapper, declarationElement);
+          wrapper.appendChild(declarationElement);
+          wrapper.appendChild(declarationSignatureCard);
+        } else {
+          declarationTextNode.parentNode.insertBefore(declarationSignatureCard, declarationTextNode.nextSibling || null);
+        }
+      }
     }
   }
 
@@ -2098,6 +1723,8 @@ const steps = useMemo(
   const [authorizerSignaturePreviewUrl, setAuthorizerSignaturePreviewUrl] = useState("");
   const [witness1SignaturePreviewUrl, setWitness1SignaturePreviewUrl] = useState("");
   const [witness2SignaturePreviewUrl, setWitness2SignaturePreviewUrl] = useState("");
+  const [witness1SignaturePreviewUrl, setWitness1SignaturePreviewUrl] = useState("");
+  const [witness2SignaturePreviewUrl, setWitness2SignaturePreviewUrl] = useState("");
   // Local Individual (Client Registration) uploads
 
   const resolveExistingUploadPreviewUrl = (field) => {
@@ -2201,7 +1828,6 @@ const steps = useMemo(
 
     setWitness2SignaturePreviewUrl(resolveExistingUploadPreviewUrl("agreementWitness2Sig"));
   }, [agreementWitness2Sig, existingFiles]);
-
   const [cfPrincipalSig, setCfPrincipalSig] = useState(null);
   const [cfFirmSig, setCfFirmSig] = useState(null);
   const [cfWitness1Sig, setCfWitness1Sig] = useState(null);
@@ -3101,33 +2727,12 @@ if (key === "declaration") {
   };
 
   const openPreview = () => {
-    const previewSrc = (fileValue, existingField = "") => {
-      if (typeof fileValue === "string") return fileValue;
-      if (fileValue && String(fileValue.type || "").startsWith("image/")) {
-        return URL.createObjectURL(fileValue);
-      }
-      return existingField ? resolveExistingUploadPreviewUrl(existingField) : "";
-    };
-
-    const tempPreviewUrls = [];
-    const trackedPreviewSrc = (fileValue, existingField = "") => {
-      const src = previewSrc(fileValue, existingField);
-      if (src && fileValue && typeof fileValue !== "string" && String(fileValue.type || "").startsWith("image/")) {
-        tempPreviewUrls.push(src);
-      }
-      return src;
-    };
-
     try {
       const markup = buildPreviewSnapshot(formScrollRef.current, {
         formVariant: isLocalIndividual(region, type)
           ? "local_individual"
-          : isLocalCorporate(region, type)
-          ? "local_corporate"
           : isForeignIndividual(region, type)
           ? "foreign_individual"
-          : isForeignCorporate(region, type)
-          ? "foreign_corporate"
           : "",
         previewImageMap: {
           localIndividualPrincipalSignature: principalSignaturePreviewUrl,
@@ -3139,26 +2744,11 @@ if (key === "declaration") {
           witness1Signature: witness1SignaturePreviewUrl,
           witness2Signature: witness2SignaturePreviewUrl,
           companySealSignature: authorizerSignaturePreviewUrl,
-          corporateDirector1Signature: trackedPreviewSrc(isLocalCorporate(region, type) ? lcDirector1Sig : fcDir1Sig, isLocalCorporate(region, type) ? "lcDirector1Sig" : "fcDir1Sig"),
-          corporateDirector2Signature: trackedPreviewSrc(isLocalCorporate(region, type) ? lcDirector2Sig : fcDir2Sig, isLocalCorporate(region, type) ? "lcDirector2Sig" : "fcDir2Sig"),
-          corporateAgentSignature: trackedPreviewSrc(isLocalCorporate(region, type) ? lcAgentSignature : fcFinalDir1Sig, isLocalCorporate(region, type) ? "lcAgentSignature" : "fcFinalDir1Sig"),
-          corporateAdvisorSignature: advisorSignaturePreviewUrl,
-          corporateStockbrokerFirmSignature: trackedPreviewSrc(isLocalCorporate(region, type) ? lcStockbrokerFirmSignature : fcFinalCompanySeal, isLocalCorporate(region, type) ? "lcStockbrokerFirmSignature" : "fcFinalCompanySeal"),
-          corporateWitness1Signature: trackedPreviewSrc(isLocalCorporate(region, type) ? lcWitness1Signature : fcCertOfficerSig, isLocalCorporate(region, type) ? "lcWitness1Signature" : "fcCertOfficerSig"),
-          corporateWitness2Signature: trackedPreviewSrc(isLocalCorporate(region, type) ? lcWitness2Signature : fcKycAuthorizedSignatorySig, isLocalCorporate(region, type) ? "lcWitness2Signature" : "fcKycAuthorizedSignatorySig"),
-          corporateAuthorizerSignature: trackedPreviewSrc(isLocalCorporate(region, type) ? lcAuthorizerSignature : fcFinalDir2Sig, isLocalCorporate(region, type) ? "lcAuthorizerSignature" : "fcFinalDir2Sig"),
-          corporateCompanySealSignature: trackedPreviewSrc(isLocalCorporate(region, type) ? lcCompanySeal : fcCompanySeal, isLocalCorporate(region, type) ? "lcCompanySeal" : "fcCompanySeal"),
-          corporatePrincipalApplicantSignature: trackedPreviewSrc(isLocalCorporate(region, type) ? lcPrincipalApplicantSignature : fcKycCertifyingOfficerSig, isLocalCorporate(region, type) ? "lcPrincipalApplicantSignature" : "fcKycCertifyingOfficerSig"),
-          corporateJointApplicantSignature: trackedPreviewSrc(isLocalCorporate(region, type) ? lcJointApplicantSignature : fcKycInvestmentAdvisorSig, isLocalCorporate(region, type) ? "lcJointApplicantSignature" : "fcKycInvestmentAdvisorSig"),
         },
       });
-      tempPreviewUrls.forEach((url) => setTimeout(() => URL.revokeObjectURL(url), 60 * 1000));
       setPreviewMarkup(markup);
       setPreviewOpen(true);
     } catch {
-      tempPreviewUrls.forEach((url) => {
-        try { URL.revokeObjectURL(url); } catch {}
-      });
       setPreviewMarkup("");
       setPreviewOpen(true);
     }

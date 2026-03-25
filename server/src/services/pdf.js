@@ -43,9 +43,7 @@ function findUploadedFile(files, field) {
   return (Array.isArray(files) ? files : []).find((file) => String(file?.field || "") === String(field || ""));
 }
 
-function renderUploadedSignatureCard(doc, files, field, title = "Principal Applicant Signature", opts = {}) {
-  if (opts?.includeInPdf !== true) return;
-
+function renderUploadedSignatureCard(doc, files, field, title = "Principal Applicant Signature") {
   const file = findUploadedFile(files, field);
   if (!file?.path) return;
 
@@ -581,7 +579,7 @@ function renderLocalIndividualClientRegistration(doc, data, opts = {}) {
   };
 
   renderPersonBlock('Principal Applicant', v.principal || {});
-  renderUploadedSignatureCard(doc, opts.files, 'principalSig', 'Principal Applicant Signature', { includeInPdf: opts.includePreviewImages === true });
+  renderUploadedSignatureCard(doc, opts.files, 'principalSig', 'Principal Applicant Signature');
   renderPersonBlock('Joint Applicant', v.jointApplicant || {}, holders[1].enabled);
   renderPersonBlock('Second Joint Applicant', v.secondJointApplicant || {}, holders[2].enabled);
   renderPersonBlock('Investment Decision', v.investmentDecision || {});
@@ -679,11 +677,7 @@ function renderLocalIndividualSchedule2(doc, data) {
   const shade = { v: false };
   addParagraph(doc, `I/We, (1) ${formatValue(v.party1Name)} [bearing National Identity Card No./Company registration No ${formatValue(v.party1Id)} of ${formatValue(v.party1Add || v.party1Address)}], (2) ${formatValue(v.party2Name)} [bearing National Identity Card No./Company registration No ${formatValue(v.party2Id)} of ${formatValue(v.party2Add || v.party2Address)}], (3) ${formatValue(v.party3Name)} [bearing National Identity Card No./Company registration No ${formatValue(v.party3Id)} of ${formatValue(v.party3Add || v.party3Address)}].`, { fontSize: 9, color: '#334155', gap: 0.35 });
   addParagraph(doc, `I/We agree and acknowledge that the following risks involved in investing / trading in securities listed on the Colombo Stock Exchange ("Risk Disclosure Statements") were explained to me/us by ${formatValue(v.explainedByName || v.explainedBy)} , an employee of Asha Securities Ltd ("Stockbroker Firm") and I/we was/were invited to read the below mentioned Risk Disclosure Statements, ask questions and take independent advice if I/we wish to.`, { fontSize: 9, color: '#334155', gap: 0.28 });
-  addBulletList(doc, [
-    'The prices of securities fluctuate, sometimes drastically and the price of a security may depreciate in value and may even become valueless.',
-    'It is possible that losses may be incurred rather than profits made as a result of transacting in securities.',
-    'It is advisable to invest funds that are not required in the short term to reduce the risk of investing.',
-  ], 8);
+  addBulletList(doc, LOCAL_INDIVIDUAL_SCHEDULE1_RISKS, 8);
   doc.moveDown(0.1);
   addParagraph(doc, 'Dear Sir/ Madam,', { fontSize: 9, color: '#334155', gap: 0.18 });
   addParagraph(doc, 'I/We hereby authorize Asha Securities Limited.', { fontSize: 9, color: '#334155', gap: 0.28 });
@@ -1093,6 +1087,23 @@ function normalizeFormDataForPdf(formKey, formData) {
     if (!isObject(out.creditFacility)) out.creditFacility = {};
     if (!isObject(out.schedule1)) out.schedule1 = {};
     if (!isObject(out.schedule2)) out.schedule2 = {};
+
+    const declarationSchedule2 = isObject(decl?.schedule2) ? decl.schedule2 : {};
+    out.schedule2 = {
+      ...declarationSchedule2,
+      ...out.schedule2,
+      party1Name: prefer(out.schedule2?.party1Name, declarationSchedule2?.party1Name, declarationSchedule2?.person1?.name, party1.name),
+      party1Id: prefer(out.schedule2?.party1Id, declarationSchedule2?.party1Id, declarationSchedule2?.person1?.nicNo, party1.nicNo),
+      party1Address: prefer(out.schedule2?.party1Address, declarationSchedule2?.party1Address, declarationSchedule2?.person1?.address, party1.address),
+      party2Name: prefer(out.schedule2?.party2Name, declarationSchedule2?.party2Name, declarationSchedule2?.person2?.name, party2.name),
+      party2Id: prefer(out.schedule2?.party2Id, declarationSchedule2?.party2Id, declarationSchedule2?.person2?.nicNo, party2.nicNo),
+      party2Address: prefer(out.schedule2?.party2Address, declarationSchedule2?.party2Address, declarationSchedule2?.person2?.address, party2.address),
+      party3Name: prefer(out.schedule2?.party3Name, declarationSchedule2?.party3Name, declarationSchedule2?.person3?.name, party3.name),
+      party3Id: prefer(out.schedule2?.party3Id, declarationSchedule2?.party3Id, declarationSchedule2?.person3?.nicNo, party3.nicNo),
+      party3Address: prefer(out.schedule2?.party3Address, declarationSchedule2?.party3Address, declarationSchedule2?.person3?.address, party3.address),
+      explainedByName: prefer(out.schedule2?.explainedByName, declarationSchedule2?.explainedByName, declarationSchedule2?.explainedBy),
+      date: prefer(out.schedule2?.date, declarationSchedule2?.date),
+    };
 
     // Overwrite / backfill parties arrays because the UI does not write to them;
     // otherwise PDFs show blanks or a dash instead of the full agreement section.

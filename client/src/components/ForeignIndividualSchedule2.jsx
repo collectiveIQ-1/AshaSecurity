@@ -68,7 +68,7 @@ export default function ForeignIndividualSchedule2({ form, update, busy }) {
 
         <div className="mt-6 rounded-3xl border border-zinc-200 bg-gradient-to-br from-white to-zinc-50 px-5 py-4 text-sm leading-[1.9] text-zinc-800 shadow-soft dark:border-zinc-800 dark:from-zinc-950/70 dark:to-zinc-950/40 dark:text-zinc-200/90">
           <span>
-            agree and acknowledge that the following risks involved in investing / trading in securities listed on the Colombo Stock Exchange (‘Risk Disclosure Statements’) were explained to me/us by 
+            I/We agree and acknowledge that the following risks involved in investing / trading in securities listed on the Colombo Stock Exchange ( “Risk Disclosure Statements” ) were explained to me/us by{' '}
           </span>
           <input
             type="text"
@@ -79,10 +79,7 @@ export default function ForeignIndividualSchedule2({ form, update, busy }) {
             className="mx-1 inline-block min-w-[220px] border-0 border-b-2 border-dotted border-zinc-500 bg-transparent px-2 py-0.5 align-baseline text-sm font-medium text-zinc-900 outline-none transition placeholder:text-zinc-400 hover:border-sky-500 focus:border-emerald-500 dark:border-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500"
           />
           <span>
-            an employee of Asha Securities Ltd (‘Stockbroker Firm’), and I/we was/were invited to read the below mentioned Risk Disclosure Statements, ask questions and take independent advice if I/we wish to.
-          </span>
-          <span>
-            Additionally, I/we acknowledge that I/we understood the following Risk Disclosure Statements;
+            , an employee of Asha Securities Ltd ( “Stockbroker Firm” ) and I/we was/were invited to read the below mentioned Risk Disclosure Statements, ask questions and take independent advice if I/we wish to.
           </span>
           <div className="mt-3 space-y-2 text-sm text-zinc-700 dark:text-zinc-300/90">
             <div>a. The prices of securities fluctuate, sometimes drastically and the price of a security may depreciate in value and may even become valueless.</div>
