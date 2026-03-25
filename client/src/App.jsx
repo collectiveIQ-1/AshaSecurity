@@ -59,14 +59,15 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-        <Route
+        {/* <Route
           path="/update"
           element={
             <ProtectedRoute>
               <Update />
             </ProtectedRoute>
           }
-        />
+        /> */}
+        <Route path="/update" element={<Update />} />
         <Route
           path="/dashboard"
           element={

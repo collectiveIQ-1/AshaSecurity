@@ -11,7 +11,7 @@ import { buildApplicationPdfBuffer } from "../services/pdf.js";
 const router = Router();
 
 // Protect application portal APIs
-router.use(requireAuth);
+// router.use(requireAuth);
 
 
 // ✅ Customers can edit submitted applications within this window
@@ -419,7 +419,7 @@ const uploadFields = upload.fields([
 /**
  * ✅ Wrap multer to return JSON errors
  */
-router.post("/", (req, res, next) => {
+router.post("/", requireAuth, (req, res, next) => {
   uploadFields(req, res, (err) => {
     if (err) return res.status(400).json({ message: err.message || "Upload error" });
     next();
@@ -431,7 +431,7 @@ router.post("/", (req, res, next) => {
  * - data (JSON string): { region, applicantType, formKey, formData }
  * - files (optional): allowed fields above
  */
-router.post("/", async (req, res) => {
+router.post("/", requireAuth, async (req, res) => {
   try {
     const raw = req.body?.data;
     if (!raw) return res.status(400).json({ message: "Missing data" });
@@ -628,7 +628,7 @@ Edit Until: ${new Date(created.editUntil).toLocaleString()}\n\nRegion: ${region}
  * category: localIndividual | localCorporate | foreignIndividual | foreignCorporate
  * Returns lightweight rows for grid view.
  */
-router.get("/admin/:category", async (req, res) => {
+router.get("/admin/:category", requireAuth, async (req, res) => {
   try {
     const cat = String(req.params.category || "");
     const map = {
