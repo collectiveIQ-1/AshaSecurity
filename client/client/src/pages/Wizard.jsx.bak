@@ -1,0 +1,3777 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { parsePhoneNumberFromString } from "libphonenumber-js";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useTheme } from "../theme/ThemeContext.jsx";
+import Stepper from "../components/Stepper.jsx";
+import { Field } from "../components/Field.jsx";
+import { Input } from "../components/Input.jsx";
+import { Select } from "../components/Select.jsx";
+import FileUpload from "../components/FileUpload.jsx";
+import PhoneInput from "../components/PhoneInput.jsx";
+import formBg from "../assets/form.jpg";
+import formBgLight from "../assets/formLight.jpg";
+
+import ClientAgreement from "../components/ClientAgreement.jsx";
+import CreditFacilityAgreementLocalIndividual from "../components/CreditFacilityAgreementLocalIndividual.jsx";
+import CreditFacilityAgreementLocalCorporate from "../components/CreditFacilityAgreementLocalCorporate.jsx";
+import PaymentInstructionLocalIndividual from "../components/PaymentInstructionLocalIndividual.jsx";
+import PaymentInstructionLocalCorporate from "../components/PaymentInstructionLocalCorporate.jsx";
+import DirectionOnlineForm from "../components/DirectionOnlineForm.jsx";
+import CorporateClientRegistration from "../components/CorporateClientRegistration.jsx";
+import KYCForm from "../components/KYCForm.jsx";
+import BeneficialOwnershipForm from "../components/BeneficialOwnershipForm.jsx";
+import AdditionalRequirements from "../components/AdditionalRequirements.jsx";
+import ForeignIndividualClientRegistration from "../components/ForeignIndividualClientRegistration.jsx";
+import ForeignIndividualDeclaration from "../components/ForeignIndividualDeclaration.jsx";
+import ForeignIndividualClientAgreement from "../components/ForeignIndividualClientAgreement.jsx";
+import ForeignIndividualDirectionOnlineForm from "../components/ForeignIndividualDirectionOnlineForm.jsx";
+import ForeignCorporateClientRegistration from "../components/ForeignCorporateClientRegistration.jsx";
+import ForeignCorporateKYCForm from "../components/ForeignCorporateKYCForm.jsx";
+import ForeignCorporateBeneficialOwnershipForm from "../components/ForeignCorporateBeneficialOwnershipForm.jsx";
+import ForeignCorporateAdditionalRequirements from "../components/ForeignCorporateAdditionalRequirements.jsx";
+import { fetchApplicationForEdit, submitApplication, updateApplication } from "../lib/api.js";
+import { loadDraft, saveDraft, clearDraft } from "../lib/draft.js";
+import { FormErrorProvider } from "../forms/FormErrorContext.jsx";
+
+// Clamp typed date years to 4 digits (keeps calendar picker intact)
+const clampDateYear4 = (value) => {
+  if (!value) return value;
+
+  // Most browsers provide YYYY-MM-DD; some allow manual typing that can exceed 4 digits for year.
+  const parts = String(value).split("-");
+  if (parts[0] && parts[0].length > 4) {
+    parts[0] = parts[0].slice(0, 4);
+    return parts.join("-").slice(0, 10);
+  }
+  return String(value).slice(0, 10);
+};
+
+
+import {
+  localIndividualSteps,
+  localIndividualEmpty,
+} from "../forms/localIndividualConfig.js";
+
+import {
+  localCorporateSteps,
+  localCorporateEmpty,
+} from "../forms/localCorporateConfig.js";
+
+import {
+  foreignIndividualSteps,
+  foreignIndividualEmpty,
+} from "../forms/foreignIndividualConfig.js";
+
+import {
+  foreignCorporateSteps,
+  foreignCorporateEmpty,
+} from "../forms/foreignCorporateConfig.js";
+
+const isLocalIndividual = (region, type) =>
+  region === "local" && type === "individual";
+
+const isLocalCorporate = (region, type) =>
+  region === "local" && type === "corporate";
+
+const isForeignIndividual = (region, type) =>
+  region === "foreign" && type === "individual";
+
+
+const isForeignCorporate = (region, type) =>
+  region === "foreign" && type === "corporate";
+
+
+function clone(v) {
+  if (typeof globalThis.structuredClone === "function") return globalThis.structuredClone(v);
+  return v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+}
+
+function isPlainObject(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+function deepMerge(base, override) {
+  // Merges `override` into `base` (without mutating inputs)
+  if (!isPlainObject(base) || !isPlainObject(override)) return clone(override ?? base);
+
+  const out = clone(base);
+  for (const [k, v] of Object.entries(override || {})) {
+    if (isPlainObject(v) && isPlainObject(out[k])) out[k] = deepMerge(out[k], v);
+    else out[k] = clone(v);
+  }
+  return out;
+}
+
+// ====================================================
+// Validation + helpers
+// ====================================================
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const LOCAL_NIC_RE = /^(\d{9}[VvXx]|\d{12})$/;
+
+function isEmailKey(k) {
+  // IMPORTANT: Avoid matching keys like "Emailed" (boolean flags) which contain
+  // the substring "email" but are NOT email address fields.
+  // Treat common email-address field names as email fields.
+  // Examples we support: email, e-mail, emailAddress, email_address, *.email, *.emailAddress
+  const key = String(k ?? "");
+  return /(^|\.)((e-?mail)|(emailAddress)|(email_address))(|$)/i.test(key);
+}
+function isPhoneKey(k) {
+  return /(telephone|tel|mobile|contact\s*no|contactNo|phone)/i.test(k);
+}
+function isAccountKey(k) {
+  return /(account\s*no|accountNo|accountNumber|cds\s*.*number|cds\.number|iban)/i.test(k);
+}
+function isNicKey(k) {
+  const full = String(k ?? "");
+  const last = full.split(".").pop() || full;
+
+  // Exclude NIC-related date fields
+  if (
+    /nic.*date/i.test(last) ||
+    /date.*nic/i.test(last) ||
+    /dateOfIssue/i.test(last) ||
+    /issueDate/i.test(last)
+  ) {
+    return false;
+  }
+
+  // ✅ Only validate actual NIC fields (NOT idNo / idNumber)
+  return /^(nic|nicNo|nicNumber|nicNum|nationalId|nationalID|nationalIdNumber|nationalIDNumber|nicOrPassport)$/i.test(
+    last
+  );
+}
+
+// Payment Instruction (Local Individual) uses idNo fields that may contain
+// either a Sri Lankan NIC (old/new format) OR a CDS A/C number.
+// We validate NIC ONLY when the value looks like a complete NIC.
+function isPaymentInstructionIdNoKey(k) {
+  const full = String(k ?? "");
+  return /^paymentInstruction\.(principal|joint|witness)\.idNo$/i.test(full);
+}
+
+function looksLikeLocalNic(v) {
+  // strip common separators (space, -, /, etc.) then uppercase
+  const s = String(v ?? "")
+    .trim()
+    .replace(/[^0-9a-zA-Z]+/g, "")
+    .toUpperCase();
+  return /^\d{9}[VX]$/.test(s) || /^\d{12}$/.test(s);
+}
+
+
+
+function digitsOnly(v) {
+  return String(v ?? "").replace(/\D+/g, "");
+}
+
+function validateEmail(v) {
+  const s = String(v ?? "").trim();
+  if (!s) return true;
+  return EMAIL_RE.test(s);
+}
+
+function normalizeNic(v) {
+  // Normalize NIC while typing:
+  // users often paste NICs with separators like spaces, hyphens, slashes, etc.
+  // We keep only letters/digits, then uppercase.
+  const s = String(v ?? "").replace(/[^0-9a-zA-Z]+/g, "");
+  if (!s) return "";
+  return s.toUpperCase();
+}
+
+function validateLocalNic(v) {
+  // Sri Lanka NIC validation
+  // Accept the official *format*:
+  // - Old NIC: 9 digits + V/X (e.g., 123456789V)
+  // - New NIC: 12 digits      (e.g., 200012345678)
+  //
+  // We also attempt a day-of-year sanity check, but we treat it as a *soft* check.
+  // (Some real-world inputs can be valid-format but fail strict ranges due to data-entry quirks.)
+  // Normalize: remove spaces/hyphens/any separators and uppercase.
+  // (Fixes false "Invalid NIC" errors when users paste NICs containing "/" or other separators.)
+  const s = String(v ?? "")
+    .trim()
+    .replace(/[^0-9a-zA-Z]+/g, "")
+    .toUpperCase();
+
+  if (!s) return true;
+
+  const isOld = /^\d{9}[VX]$/.test(s);
+  const isNew = /^\d{12}$/.test(s);
+
+  if (!isOld && !isNew) return false;
+
+  // Soft checks (do NOT block)
+  if (isOld) {
+    const ddd = parseInt(s.slice(2, 5), 10);
+    // expected: 001-366 (male) or 501-866 (female)
+    // If out of range, still allow (format is correct).
+    void ddd;
+  }
+
+  if (isNew) {
+    const yyyy = parseInt(s.slice(0, 4), 10);
+    const ddd = parseInt(s.slice(4, 7), 10);
+    void yyyy;
+    void ddd;
+  }
+
+  return true;
+}
+
+function normalizePhoneValue(v) {
+  const raw = String(v ?? "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("+")) {
+    const parts = raw.split(/\s+/);
+    const code = parts[0] || "";
+    const number = digitsOnly(parts.slice(1).join(""));
+    return number ? `${code} ${number}` : "";
+  }
+  // legacy: just digits
+  const d = digitsOnly(raw);
+  return d ? `+94 ${d}` : "";
+}
+
+function validatePhoneValue(v) {
+  const raw = String(v ?? "").trim();
+  if (!raw) return true;
+
+  const norm = normalizePhoneValue(raw);
+  if (!norm) return true;
+
+  // normalizePhoneValue returns a value like "+94 771234567".
+  // libphonenumber-js will validate length + country-specific rules.
+  const compact = norm.replace(/\s+/g, "");
+  const phone = parsePhoneNumberFromString(compact);
+  if (!phone) return false;
+
+  return phone.isValid();
+}
+
+// ---- Credit Facility date/month validation helpers ----
+function isIntInRange(v, min, max) {
+  const s = String(v ?? "").trim();
+  if (!s) return false;
+  const n = Number(s);
+  return Number.isInteger(n) && n >= min && n <= max;
+}
+function validateCFDay(v) {
+  return isIntInRange(v, 1, 31);
+}
+function validateCFMonth(v) {
+  return isIntInRange(v, 1, 12);
+}
+function normalize2Digits(v) {
+  return digitsOnly(String(v ?? "")).slice(0, 2);
+}
+
+function walkObject(obj, basePath = "") {
+  const out = [];
+  const stack = [{ val: obj, path: basePath }];
+  while (stack.length) {
+    const { val, path } = stack.pop();
+    if (val && typeof val === "object" && !Array.isArray(val)) {
+      for (const [k, v] of Object.entries(val)) {
+        const p = path ? `${path}.${k}` : k;
+        if (v && typeof v === "object" && !Array.isArray(v)) stack.push({ val: v, path: p });
+        else out.push({ key: k, path: p, value: v });
+      }
+    }
+  }
+  return out;
+}
+
+function getPrincipalProfile(nextForm, region, type) {
+  // Individual
+  if (region === "local" && type === "individual") {
+    const p = nextForm?.clientRegistration?.principal || {};
+    const fullName = [p.title, p.namesByInitials || p.initials, p.surname].filter(Boolean).join(" ").trim();
+    return { name: fullName, nic: p.nic, dob: p.dateOfBirth || p.dob };
+  }
+  if (region === "foreign" && type === "individual") {
+    const p = nextForm?.fiClientRegistration?.principal || nextForm?.clientRegistration?.principal || {};
+    const fullName = [p.title, p.fullName || p.name, p.surname].filter(Boolean).join(" ").trim();
+    return { name: fullName, nic: p.passportNo || p.nic, dob: p.dateOfBirth || p.dob };
+  }
+  // Corporate
+  if (type === "corporate") {
+    const c = nextForm?.clientRegistration || nextForm?.fcClientRegistration || {};
+    const name = c.companyName || c.nameOfCompany || "";
+    const reg = c.regNo || c.businessRegNo || "";
+    return { companyName: String(name).trim(), regNo: String(reg).trim() };
+  }
+  return {};
+}
+
+function applyAutofill(nextForm, region, type) {
+  const prof = getPrincipalProfile(nextForm, region, type);
+
+  // Local Individual: Direction Online "Client Name" should NOT include the title (e.g., "Ms").
+  // If only the title exists, keep the field empty until real name parts are present.
+  let directionOnlineClientName = prof.name;
+  if (region === "local" && type === "individual") {
+    const p = nextForm?.clientRegistration?.principal || {};
+    const noTitle = [p.namesByInitials || p.initials, p.surname].filter(Boolean).join(" ").trim();
+    directionOnlineClientName = noTitle;
+  }
+
+  const fillIfEmpty = (path, value) => {
+    if (value === undefined || value === null) return;
+    const cur = getByPath(nextForm, path);
+    if (cur === undefined || cur === null || String(cur).trim() === "") setByPath(nextForm, path, value);
+  };
+
+  // Individual: copy name / NIC into other steps if present
+  if (prof.name) {
+    fillIfEmpty("clientAgreement.parties.0.name", prof.name);
+    // fillIfEmpty("creditFacility.client.name", prof.name);
+    // if (directionOnlineClientName) fillIfEmpty("directionOnline.clientName", directionOnlineClientName);
+    // fillIfEmpty("directionOnline.iWe.name", prof.name);
+  }
+  if (prof.nic) {
+    fillIfEmpty("clientAgreement.parties.0.nicNo", prof.nic);
+    // fillIfEmpty("creditFacility.client.nicCds", prof.nic);
+  }
+
+  // Corporate: copy company name
+  if (prof.companyName) {
+    fillIfEmpty("clientAgreement.parties.0.name", prof.companyName);
+    fillIfEmpty("creditFacility.client.name", prof.companyName);
+  }
+
+  // Corporate: copy Witness / Advisor details from Payment Instruction -> Credit Facility witness section
+  // const piW = nextForm?.paymentInstruction?.witness || {};
+  // if (piW?.name) fillIfEmpty("creditFacility.execution.witness1.name", piW.name);
+  // if (piW?.idNo) fillIfEmpty("creditFacility.execution.witness1.nic", piW.idNo);
+
+  // const cfW = nextForm?.creditFacility?.execution?.witness1 || {};
+  // if (cfW?.name) fillIfEmpty("paymentInstruction.witness.name", cfW.name);
+  // if (cfW?.nic) fillIfEmpty("paymentInstruction.witness.idNo", cfW.nic);
+
+//   if (isLocalCorporate(region, type)) {
+//   const cfW = nextForm?.creditFacility?.execution?.witness1 || {};
+
+//   if (cfW?.name) fillIfEmpty("paymentInstruction.witness.name", cfW.name);
+//   if (cfW?.nic)  fillIfEmpty("paymentInstruction.witness.idNo", cfW.nic);
+// }
+
+
+  
+
+}
+
+// Ensure all UI auto-filled/computed fields are **persisted** before submit/update,
+// so the emailed PDF matches exactly what the user sees in the UI.
+function materializeAutofillForSubmit(form, region, type) {
+  const next = clone(form || {});
+
+  // Run existing autofill rules (writes into `next` via setByPath)
+  applyAutofill(next, region, type);
+
+  // ---- Local -> Individual specific auto blocks (Joint CDS Instructions + Declaration I/We) ----
+  if (region === "local" && type === "individual") {
+    const cr = next?.clientRegistration || {};
+    const principal = cr?.principal || {};
+    const joint1 = cr?.jointApplicant || {};
+    const joint2 = cr?.secondJointApplicant || {};
+    const jci = cr?.jointCdsInstructions || {};
+
+    const principalInitials = String(principal?.initials || principal?.namesByInitials || "").trim();
+    const joint1Initials = joint1?.enabled ? String(joint1?.initials || joint1?.namesByInitials || "").trim() : "";
+    const joint2Initials = joint2?.enabled ? String(joint2?.initials || joint2?.namesByInitials || "").trim() : "";
+    const jointNames = [joint1Initials, joint2Initials].filter(Boolean).join(" / ");
+
+    const today = new Date();
+    const yyyy = String(today.getFullYear()).padStart(4, "0");
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const dd = String(today.getDate()).padStart(2, "0");
+    const iso = `${yyyy}-${mm}-${dd}`;
+
+    const preferFull = (existing, desired) => {
+      const ex = String(existing ?? "").trim();
+      const des = String(desired ?? "").trim();
+      if (!des) return ex;
+      if (!ex) return des;
+      const looksLikeInitialsOnly = /^[A-Za-z](?:\s+[A-Za-z])*$/.test(ex);
+      if (des.length > ex.length && (ex.length <= 3 || looksLikeInitialsOnly)) return des;
+      return ex;
+    };
+
+    const fillIfEmptyOrShort = (path, value) => {
+      if (value === undefined || value === null) return;
+      const cur = getByPath(next, path);
+      const nextVal = preferFull(cur, value);
+      if (String(nextVal ?? "").trim() !== String(cur ?? "").trim()) {
+        setByPath(next, path, nextVal);
+      }
+    };
+
+    fillIfEmptyOrShort("clientRegistration.jointCdsInstructions.principalHolder", principalInitials);
+    fillIfEmptyOrShort("clientRegistration.jointCdsInstructions.firstJointHolder", joint1Initials);
+    fillIfEmptyOrShort("clientRegistration.jointCdsInstructions.secondJointHolder", joint2Initials);
+    fillIfEmptyOrShort("clientRegistration.jointCdsInstructions.iName", principalInitials);
+    fillIfEmptyOrShort("clientRegistration.jointCdsInstructions.authorizeJointName", jointNames);
+    fillIfEmptyOrShort("clientRegistration.jointCdsInstructions.paymentsToName", principalInitials);
+    fillIfEmptyOrShort("clientRegistration.jointCdsInstructions.date", iso);
+
+    const fullName = String(
+      principal?.namesByInitials || [principal?.initials, principal?.surname].filter(Boolean).join(" ")
+    ).trim();
+
+    fillIfEmptyOrShort("declaration.iWe.name", fullName);
+    fillIfEmptyOrShort("declaration.iWe.nicNo", principal?.nic);
+    fillIfEmptyOrShort("declaration.iWe.address", principal?.permanentAddress);
+    fillIfEmptyOrShort("declaration.iWe.cds.prefix", principal?.cds?.prefix);
+    fillIfEmptyOrShort("declaration.iWe.cds.number", principal?.cds?.number);
+
+    // Also auto-fill all agreement-document parties (if those steps exist)
+    const p1 = { name: fullName, nicNo: principal?.nic, address: principal?.permanentAddress };
+    const p2 = joint1?.enabled
+      ? {
+          name: String([joint1?.title, joint1?.namesByInitials || joint1?.initials, joint1?.surnames].filter(Boolean).join(" ")).trim(),
+          nicNo: joint1?.nic,
+          address: joint1?.permanentAddress || joint1?.correspondenceAddress,
+        }
+      : { name: "", nicNo: "", address: "" };
+    const p3 = joint2?.enabled
+      ? {
+          name: String([joint2?.title, joint2?.namesByInitials || joint2?.initials, joint2?.surnames].filter(Boolean).join(" ")).trim(),
+          nicNo: joint2?.nic,
+          address: joint2?.residentialAddress || joint2?.officeAddress,
+        }
+      : { name: "", nicNo: "", address: "" };
+
+    ["clientAgreement", "creditFacility", "paymentInstruction", "directionOnline"].forEach((stepKey) => {
+      const parties = getByPath(next, `${stepKey}.parties`);
+      if (Array.isArray(parties)) {
+        // fill party 0..2 only if empty
+        const src = [p1, p2, p3];
+        for (let i = 0; i < Math.min(parties.length, src.length); i++) {
+          const base = parties[i] || {};
+          const s = src[i] || {};
+          parties[i] = {
+            ...base,
+            name: String(base.name || "").trim() ? base.name : s.name,
+            nicNo: String(base.nicNo || "").trim() ? base.nicNo : s.nicNo,
+            address: String(base.address || "").trim() ? base.address : s.address,
+          };
+        }
+        setByPath(next, `${stepKey}.parties`, parties);
+      }
+    });
+  }
+
+  return next;
+}
+
+// Ensure the payload contains ONLY the steps that belong to the selected form.
+// (Prevents emailed PDFs from showing extra steps from other wizards.)
+function getAllowedStepKeysForFormKey(formKey) {
+  switch (String(formKey || "")) {
+    case "local_individual":
+      return [
+        "clientRegistration",
+        "declaration",
+        "clientAgreement",
+        "creditFacility",
+        "paymentInstruction",
+        "directionOnline",
+      ];
+    case "local_corporate":
+      return [
+        "clientRegistration",
+        "creditFacility",
+        "paymentInstruction",
+        "kyc",
+        "beneficialOwnership",
+        "additionalRequirements",
+      ];
+    case "foreign_individual":
+      return [
+        "fiClientRegistration",
+        "fiDeclaration",
+        "fiClientAgreement",
+        "fiDirectionOnline",
+      ];
+    case "foreign_corporate":
+      return [
+        "fcClientRegistration",
+        "fcKyc",
+        "fcBeneficialOwnership",
+        "fcAdditionalRequirements",
+      ];
+    default:
+      return [];
+  }
+}
+
+function pruneFormDataForFormKey(formKey, formData) {
+  const allowed = new Set(getAllowedStepKeysForFormKey(formKey));
+  const src = formData && typeof formData === "object" ? formData : {};
+  const out = {};
+  for (const k of Object.keys(src)) {
+    if (allowed.has(k)) out[k] = src[k];
+  }
+  return out;
+}
+
+function getByPath(root, path) {
+  try {
+    const parts = String(path || "").split(".");
+    let cur = root;
+    for (const part of parts) {
+      if (cur == null) return undefined;
+      const m = part.match(/^(.+?)\[(\d+)\]$/);
+      if (m) {
+        const key = m[1];
+        const idx = Number(m[2]);
+        cur = cur?.[key];
+        if (!Array.isArray(cur)) return undefined;
+        cur = cur[idx];
+      } else {
+        cur = cur?.[part];
+      }
+    }
+    return cur;
+  } catch {
+    return undefined;
+  }
+}
+
+function setByPath(root, path, value) {
+  // Supports array indices like: "creditFacility.parties.0.name"
+  const parts = path.split(".");
+  let cur = root;
+
+  for (let i = 0; i < parts.length - 1; i++) {
+    const raw = parts[i];
+    const isIndex = raw !== "" && !Number.isNaN(Number(raw));
+    const key = isIndex ? Number(raw) : raw;
+
+    const nextRaw = parts[i + 1];
+    const nextIsIndex = nextRaw !== "" && !Number.isNaN(Number(nextRaw));
+
+    if (cur[key] == null || typeof cur[key] !== "object") {
+      cur[key] = nextIsIndex ? [] : {};
+    }
+
+    cur = cur[key];
+  }
+
+  const lastRaw = parts[parts.length - 1];
+  const lastIsIndex = lastRaw !== "" && !Number.isNaN(Number(lastRaw));
+  const lastKey = lastIsIndex ? Number(lastRaw) : lastRaw;
+  cur[lastKey] = value;
+}
+
+
+export default function Wizard() {
+  const { region, type } = useParams();
+  const nav = useNavigate();
+  const loc = useLocation();
+  const { theme } = useTheme();
+  const search = loc?.search || "";
+  const searchParams = useMemo(() => new URLSearchParams(search), [search]);
+  const editId = searchParams.get("edit");
+  const isEditing = Boolean(editId);
+
+
+  
+const isFormRoute =
+  isLocalIndividual(region, type) ||
+  isLocalCorporate(region, type) ||
+  isForeignIndividual(region, type) ||
+  isForeignCorporate(region, type);
+
+const pageBgStyle = isFormRoute
+  ? {
+      backgroundImage: `url(${theme === "dark" ? formBg : formBgLight})`,
+      backgroundSize: "cover",
+      backgroundPosition: "center",
+      backgroundRepeat: "no-repeat",
+    }
+  : undefined;
+
+const steps = useMemo(
+    () => {
+      if (isLocalIndividual(region, type)) return localIndividualSteps;
+      if (isLocalCorporate(region, type)) return localCorporateSteps;
+      if (isForeignIndividual(region, type)) return foreignIndividualSteps;
+      if (isForeignCorporate(region, type)) return foreignCorporateSteps;
+      return [];
+    },
+    [region, type]
+  );
+  const empty = useMemo(
+    () => {
+      if (isLocalIndividual(region, type)) return localIndividualEmpty;
+      if (isLocalCorporate(region, type)) return localCorporateEmpty;
+      if (isForeignIndividual(region, type)) return foreignIndividualEmpty;
+      if (isForeignCorporate(region, type)) return foreignCorporateEmpty;
+      return {};
+    },
+    [region, type]
+  );
+  const initial = useMemo(() => {
+  const draft = loadDraft(region, type);
+  // Always start from `empty` so missing nested keys never break typing.
+  return draft ? deepMerge(empty, draft) : clone(empty);
+}, [region, type, empty]);
+
+  const [step, setStep] = useState(1);
+  const [form, setForm] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  // ✅ If opened with ?edit=<id>, load submitted application from server for editing
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!isEditing) return;
+      try {
+        setBusy(true);
+        setError("");
+        const payload = await fetchApplicationForEdit({ id: editId });
+        if (!alive) return;
+
+        // Safety: ensure route matches the loaded application
+        if (
+          String(payload?.region || "") !== String(region || "") ||
+          String(payload?.applicantType || "") !== String(type || "")
+        ) {
+          setError("This edit link does not match the selected application flow.");
+          return;
+        }
+
+        // Map server-side uploaded files so we can allow skipping re-upload while editing
+        const filesArr = Array.isArray(payload?.files) ? payload.files : [];
+        const existingMap = {};
+        for (const f of filesArr) {
+          if (f?.field) existingMap[f.field] = f;
+        }
+        setExistingFiles(existingMap);
+
+        setForm(payload?.formData || initial);
+        setStep(1);
+      } catch (e) {
+        if (!alive) return;
+        setError(e?.message || "Failed to load application for editing");
+      } finally {
+        if (alive) setBusy(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing, editId, region, type]);
+
+  const formScrollRef = useRef(null);
+  const saveTimerRef = useRef(null);
+  const toastTimerRef = useRef(null);
+  const prevFlowRef = useRef({ region, type });
+  const [toast, setToast] = useState(null);
+
+  const showToast = (message) => {
+    const msg = String(message || "").trim();
+    if (!msg) return;
+    setToast(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3500);
+  };
+
+  const scrollFormTop = (smooth = true) => {
+    const el = formScrollRef.current;
+    if (!el) return;
+    try {
+      el.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
+    } catch {
+      el.scrollTop = 0;
+    }
+  };
+  useEffect(() => {
+    if (error) {
+      showToast(error);
+      scrollFormTop(true);
+    }
+  }, [error]);
+
+
+
+
+  // uploads (clientRegistration)
+  // existing uploaded files (when editing) so we don't force re-upload
+  const [existingFiles, setExistingFiles] = useState({});
+  const hasExisting = (field) => !!existingFiles?.[field];
+
+  const [bankProof, setBankProof] = useState(null);
+  const [principalSig, setPrincipalSig] = useState(null);
+  const [jointSig, setJointSig] = useState(null);
+  const [secondJointSig, setSecondJointSig] = useState(null);
+  const [agreementFirmSig, setAgreementFirmSig] = useState(null);
+  const [agreementWitness1Sig, setAgreementWitness1Sig] = useState(null);
+  const [agreementWitness2Sig, setAgreementWitness2Sig] = useState(null);
+  const [cfPrincipalSig, setCfPrincipalSig] = useState(null);
+  const [cfFirmSig, setCfFirmSig] = useState(null);
+  const [cfWitness1Sig, setCfWitness1Sig] = useState(null);
+  const [cfWitness2Sig, setCfWitness2Sig] = useState(null);
+  const [piJointSig, setPiJointSig] = useState(null);
+  const [piWitnessSig, setPiWitnessSig] = useState(null);
+  // Payment Instruction uploads (local corporate)
+  const [lcPiPrincipalSig, setLcPiPrincipalSig] = useState(null);
+  const [lcPiJointSig, setLcPiJointSig] = useState(null);
+  const [lcPiWitnessSig, setLcPiWitnessSig] = useState(null);
+
+  const [lcDirector1Sig, setLcDirector1Sig] = useState(null);
+  const [lcDirector2Sig, setLcDirector2Sig] = useState(null);
+  const [lcCompanySeal, setLcCompanySeal] = useState(null);
+  
+
+
+  // Auto-sync Client Agreement witnesses -> Credit Facility witnesses
+  useEffect(() => {
+    setCfWitness1Sig(agreementWitness1Sig || null);
+  }, [agreementWitness1Sig]);
+
+  useEffect(() => {
+    setCfWitness2Sig(agreementWitness2Sig || null);
+  }, [agreementWitness2Sig]);
+
+
+  // Auto-sync Payment Instruction witness/advisor signature -> Credit Facility witness signature (local corporate)
+  useEffect(() => {
+    if (isLocalCorporate(region, type) && lcPiWitnessSig && !cfWitness1Sig) {
+      setCfWitness1Sig(lcPiWitnessSig);
+    }
+  }, [lcPiWitnessSig, region, type]);
+
+  useEffect(() => {
+    if (isLocalCorporate(region, type) && cfWitness1Sig && !lcPiWitnessSig) {
+      setLcPiWitnessSig(cfWitness1Sig);
+    }
+  }, [cfWitness1Sig, region, type]);
+
+
+
+    // uploads (local corporate)
+  const [corpRegCert, setCorpRegCert] = useState(null);
+  const [kycDocs, setKycDocs] = useState(null);
+  const [boDocs, setBoDocs] = useState(null);
+  // foreign corporate - beneficial ownership uploads
+  const [fcBoAuthorizedPersonSig, setFcBoAuthorizedPersonSig] = useState(null);
+  const [fcBoAfiSignatureSeal, setFcBoAfiSignatureSeal] = useState(null);
+  const [boFiSeal, setBoFiSeal] = useState(null);
+  const [additionalDocs, setAdditionalDocs] = useState(null);
+
+  // uploads (foreign corporate)
+const [fcDir1Sig, setFcDir1Sig] = useState(null);
+const [fcDir2Sig, setFcDir2Sig] = useState(null);
+const [fcCompanySeal, setFcCompanySeal] = useState(null);
+
+// uploads (foreign corporate - KYC)
+const [fcKycAuthorizedSignatorySig, setFcKycAuthorizedSignatorySig] = useState(null);
+const [fcKycCertifyingOfficerSig, setFcKycCertifyingOfficerSig] = useState(null);
+const [fcKycInvestmentAdvisorSig, setFcKycInvestmentAdvisorSig] = useState(null);
+
+
+const [fcFinalDir1Sig, setFcFinalDir1Sig] = useState(null);
+const [fcFinalDir2Sig, setFcFinalDir2Sig] = useState(null);
+const [fcFinalCompanySeal, setFcFinalCompanySeal] = useState(null);
+const [fcCertOfficerSig, setFcCertOfficerSig] = useState(null);
+
+// uploads (declaration)
+  const [clientSig, setClientSig] = useState(null);
+  const [advisorSig, setAdvisorSig] = useState(null);
+  // Clear all upload states when switching application flow (e.g., Local -> Foreign)
+  // so previously-selected files/signatures don't persist in memory.
+  const resetUploads = () => {
+    setBankProof(null);
+    setPrincipalSig(null);
+    setJointSig(null);
+    setSecondJointSig(null);
+
+    setAgreementFirmSig(null);
+    setAgreementWitness1Sig(null);
+    setAgreementWitness2Sig(null);
+
+    setCfPrincipalSig(null);
+    setCfFirmSig(null);
+    setCfWitness1Sig(null);
+    setCfWitness2Sig(null);
+
+    setPiJointSig(null);
+    setPiWitnessSig(null);
+
+    setLcPiPrincipalSig(null);
+    setLcPiJointSig(null);
+    setLcPiWitnessSig(null);
+
+    setLcDirector1Sig(null);
+    setLcDirector2Sig(null);
+    setLcCompanySeal(null);
+
+    setCorpRegCert(null);
+    setKycDocs(null);
+    setBoDocs(null);
+
+    setFcBoAuthorizedPersonSig(null);
+    setFcBoAfiSignatureSeal(null);
+    setBoFiSeal(null);
+    setAdditionalDocs(null);
+
+    setFcDir1Sig(null);
+    setFcDir2Sig(null);
+    setFcCompanySeal(null);
+
+    setFcKycAuthorizedSignatorySig(null);
+    setFcKycCertifyingOfficerSig(null);
+    setFcKycInvestmentAdvisorSig(null);
+
+    setFcFinalDir1Sig(null);
+    setFcFinalDir2Sig(null);
+    setFcFinalCompanySeal(null);
+    setFcCertOfficerSig(null);
+
+    setClientSig(null);
+    setAdvisorSig(null);
+  };
+
+  // When user switches application flow (route changes like /apply/local/individual -> /apply/foreign/individual),
+  // ensure we start fresh and do NOT keep the previous form's in-memory data.
+  useEffect(() => {
+    if (isEditing) return;
+
+    const prev = prevFlowRef.current;
+    if (prev?.region && prev?.type && (prev.region !== region || prev.type !== type)) {
+      // Wipe the previous flow's draft so if user goes back, they don't see old values.
+      clearDraft(prev.region, prev.type);
+    }
+
+    // Also wipe ALL other flow drafts (except the current one).
+    // This prevents a common user mistake:
+    // starting the wrong form, switching to the correct form, and later seeing old values again.
+    const flows = [
+      { region: "local", type: "individual" },
+      { region: "local", type: "corporate" },
+      { region: "foreign", type: "individual" },
+      { region: "foreign", type: "corporate" },
+    ];
+    flows.forEach((f) => {
+      if (String(f.region) === String(region) && String(f.type) === String(type)) return;
+      clearDraft(f.region, f.type);
+    });
+
+    prevFlowRef.current = { region, type };
+
+    setStep(1);
+    setForm(initial);
+    setError("");
+    resetUploads();
+    scrollFormTop(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [region, type, isEditing, initial]);
+
+
+  const total = steps.length;
+  const currentKey = steps[step - 1]?.key;
+  const pct = total ? Math.round((step / total) * 100) : 0;
+
+  // ----------------------------------------------------
+  // Local -> Corporate: Auto-fill Payment Instruction witness/advisor
+  // from Agreement - Credit Facility (witness section)
+  // ----------------------------------------------------
+  useEffect(() => {
+    if (!isLocalCorporate(region, type)) return;
+    if (currentKey !== "paymentInstruction") return;
+
+    const w1 = form?.creditFacility?.execution?.witness1 || {};
+    const srcName = String(w1?.name || "").trim();
+    const srcNic = String(w1?.nic || "").trim();
+
+    const dstName = String(form?.paymentInstruction?.witness?.name || "").trim();
+    const dstId = String(form?.paymentInstruction?.witness?.idNo || "").trim();
+
+    // Copy only when there's a source value and destination is empty or different
+    if (srcName && dstName !== srcName) update("paymentInstruction.witness.name", srcName);
+    if (srcNic && dstId !== srcNic) update("paymentInstruction.witness.idNo", srcNic);
+  }, [region, type, currentKey, form?.creditFacility?.execution?.witness1?.name, form?.creditFacility?.execution?.witness1?.nic]);
+
+  const update = (path, value) => {
+    const p = String(path || "");
+    let v = value;
+
+    // Normalize inputs + friendly inline validation toasts
+    if (isPhoneKey(p)) {
+      const before = String(v ?? "");
+      const norm = normalizePhoneValue(before);
+      // If user typed letters/symbols into number, show a hint
+      if (before && norm && digitsOnly(before) !== digitsOnly(norm)) {
+        showToast("Phone numbers can contain digits only.");
+      }
+      v = norm;
+    }
+
+    if (isAccountKey(p)) {
+      const before = String(v ?? "");
+      const d = digitsOnly(before);
+      if (before && d !== before.replace(/\s+/g, "")) {
+        showToast("Invalid Account number.");
+      }
+      v = d;
+    }
+
+    // NIC: normalize spacing/hyphens and uppercase while typing
+    // - Local Individual: no popup/toast while typing; validate on "Next".
+    // - Other local flows: show a toast once it looks complete and the *format* is wrong.
+    if (region === "local" && isNicKey(p)) {
+      v = normalizeNic(v);
+      const s = String(v || "").trim();
+      if (type !== "individual") {
+        if (s && (s.length === 10 || s.length === 12) && !LOCAL_NIC_RE.test(s)) {
+          showToast("Invalid NIC.");
+        }
+      }
+    }
+
+    // Local Individual -> Payment Instruction: idNo can be NIC or CDS.
+    // Validate NIC only when the user typed a full NIC pattern.
+    if (region === "local" && isPaymentInstructionIdNoKey(p)) {
+      const norm = normalizeNic(v);
+      if (type !== "individual" && looksLikeLocalNic(norm) && !validateLocalNic(norm)) {
+        showToast("Invalid NIC.");
+      }
+      // Store normalized NIC format when it looks like NIC, otherwise keep as-is (CDS, etc.)
+      v = looksLikeLocalNic(norm) ? norm : v;
+    }
+
+    if (isEmailKey(p)) {
+      const s = String(v ?? "").trim();
+      if (s && !validateEmail(s)) {
+      // No toast pop-up: we still keep the value, and step validation can handle errors.
+    }
+    }
+
+    // Credit Facility: allow only 1-2 digits for Date/Month fields
+    if (
+      p === "creditFacility.date.day" ||
+      p === "creditFacility.date.month" ||
+      p === "creditFacility.execution.date" ||
+      p === "creditFacility.execution.month"
+    ) {
+      const before = String(v ?? "");
+      const norm = normalize2Digits(before);
+      if (before && norm !== before) showToast("Use numbers only.");
+      v = norm;
+    }
+
+
+    // Date inputs (YYYY-MM-DD): some users type the year manually and may enter more than 4 digits.
+    // Keep the calendar picker behavior, but clamp the YEAR portion to 4 digits when a date-like string is typed.
+    if (/(^|\.)date$/i.test(p) || /date|dob|birth|expiry|issued|issue/i.test(p)) {
+      const s = String(v ?? "");
+      // Handle <input type="date" /> value like "YYYY-MM-DD"
+      if (/^\d{4,}-\d{2}-\d{2}$/.test(s)) {
+        const parts = s.split("-");
+        parts[0] = parts[0].slice(0, 4);
+        v = parts.join("-");
+      }
+      // Handle "DD/MM/YYYY" typed values (if any)
+      if (/^\d{1,2}\/\d{1,2}\/\d{4,}$/.test(s)) {
+        const parts = s.split("/");
+        parts[2] = parts[2].slice(0, 4);
+        v = parts.join("/");
+      }
+    }
+
+
+    // Date fields: if user types the year manually, keep it to 4 digits (still allows calendar pickers)
+    if (/(^|\.)year$/i.test(p)) {
+      v = digitsOnly(String(v ?? "")).slice(0, 4);
+    }
+    const next = clone(form || {});
+    setByPath(next, path, v);
+
+    // Autofill repeated fields across steps (when empty)
+    applyAutofill(next, region, type);
+
+    setForm(next);
+
+    // Auto-save (debounced)
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveDraft(region, type, next);
+    }, 350);
+  };
+
+  // ✅ Ensure Local Individual auto-filled fields are persisted so the PDF/email includes them
+  useEffect(() => {
+    if (!(region === "local" && type === "individual")) return;
+
+    const cr = form?.clientRegistration || {};
+    const principal = cr?.principal || {};
+    const joint1 = cr?.jointApplicant || {};
+    const joint2 = cr?.secondJointApplicant || {};
+    const jci = cr?.jointCdsInstructions || {};
+    const decl = form?.declaration || {};
+
+    const principalInitials = String(principal?.initials || principal?.namesByInitials || "").trim();
+    const joint1Initials = joint1?.enabled ? String(joint1?.initials || joint1?.namesByInitials || "").trim() : "";
+    const joint2Initials = joint2?.enabled ? String(joint2?.initials || joint2?.namesByInitials || "").trim() : "";
+    const jointNames = [joint1Initials, joint2Initials].filter(Boolean).join(" / ");
+
+    const today = new Date();
+    const yyyy = String(today.getFullYear()).padStart(4, "0");
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const dd = String(today.getDate()).padStart(2, "0");
+    const iso = `${yyyy}-${mm}-${dd}`;
+
+    // Joint CDS Instructions (fill only when empty so user edits remain)
+    if (!String(jci?.principalHolder || "").trim() && principalInitials) update("clientRegistration.jointCdsInstructions.principalHolder", principalInitials);
+    if (!String(jci?.firstJointHolder || "").trim() && joint1Initials) update("clientRegistration.jointCdsInstructions.firstJointHolder", joint1Initials);
+    if (!String(jci?.secondJointHolder || "").trim() && joint2Initials) update("clientRegistration.jointCdsInstructions.secondJointHolder", joint2Initials);
+    if (!String(jci?.iName || "").trim() && principalInitials) update("clientRegistration.jointCdsInstructions.iName", principalInitials);
+    if (!String(jci?.authorizeJointName || "").trim() && jointNames) update("clientRegistration.jointCdsInstructions.authorizeJointName", jointNames);
+    if (!String(jci?.paymentsToName || "").trim() && principalInitials) update("clientRegistration.jointCdsInstructions.paymentsToName", principalInitials);
+    if (!String(jci?.date || "").trim()) update("clientRegistration.jointCdsInstructions.date", iso);
+
+    // Declaration -> I/We block
+    const iwe = decl?.iWe || {};
+    const fullName = String(
+      principal?.namesByInitials || [principal?.initials, principal?.surname].filter(Boolean).join(" ")
+    ).trim();
+
+    if (!String(iwe?.name || "").trim() && fullName) update("declaration.iWe.name", fullName);
+    if (!String(iwe?.nicNo || "").trim() && String(principal?.nic || "").trim()) update("declaration.iWe.nicNo", principal.nic);
+    if (!String(iwe?.address || "").trim() && String(principal?.permanentAddress || "").trim()) update("declaration.iWe.address", principal.permanentAddress);
+
+    const cdsPrefix = principal?.cds?.prefix;
+    const cdsNumber = principal?.cds?.number;
+    if (!String(iwe?.cds?.prefix || "").trim() && String(cdsPrefix || "").trim()) update("declaration.iWe.cds.prefix", cdsPrefix);
+    if (!String(iwe?.cds?.number || "").trim() && String(cdsNumber || "").trim()) update("declaration.iWe.cds.number", cdsNumber);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [region, type, form?.clientRegistration?.principal?.initials, form?.clientRegistration?.principal?.namesByInitials, form?.clientRegistration?.principal?.surname, form?.clientRegistration?.principal?.nic, form?.clientRegistration?.principal?.permanentAddress, form?.clientRegistration?.principal?.cds?.prefix, form?.clientRegistration?.principal?.cds?.number, form?.clientRegistration?.jointApplicant?.enabled, form?.clientRegistration?.jointApplicant?.initials, form?.clientRegistration?.secondJointApplicant?.enabled, form?.clientRegistration?.secondJointApplicant?.initials]);
+
+  const validateStep = (overrideKey) => {
+    setError("");
+    setFieldErrors({});
+
+const requireUpload = (fileVal, existingKey, msg) => {
+  const ok = !!fileVal || (isEditing && hasExisting(existingKey));
+  if (!ok) {
+    setError(msg);
+    setFieldErrors({ [existingKey]: msg });
+    showToast(msg);
+    scrollFormTop(true);
+    return false;
+  }
+  return true;
+};
+
+
+    // When navigating by clicking a step in the left panel we need to validate
+    // the *source* step, not necessarily the currently rendered one.
+    const key = overrideKey || currentKey;
+
+    // Format validations (email/phone/NIC/account) for the current step
+    const section = form?.[key] || {};
+
+    // Joint/2nd joint flags are used in multiple steps (especially Client Agreement).
+    // These MUST be declared before they're referenced, otherwise the step navigation
+    // can crash (e.g., Next button appears to do nothing).
+    const jointEnabled = !!form?.clientRegistration?.jointApplicant?.enabled;
+    const secondJointEnabled = !!form?.clientRegistration?.secondJointApplicant?.enabled;
+    for (const item of walkObject(section, key)) {
+      const p = item.path;   // ✅ full path
+      const v = item.value;
+
+      if (isEmailKey(p) && String(v || "").trim() && !validateEmail(v)) {
+        const msg = "Invalid email address.";
+        setError(msg);
+        setFieldErrors({ [p]: msg });
+        showToast(msg);
+        scrollFormTop(true);
+        return false;
+      }
+
+      if (isPhoneKey(p) && String(v || "").trim() && !validatePhoneValue(v)) {
+        const msg = "Invalid phone number. Use digits only and select the country code.";
+        setError(msg);
+        setFieldErrors({ [p]: msg });
+        showToast(msg);
+        scrollFormTop(true);
+        return false;
+      }
+
+      if (isAccountKey(p) && String(v || "").trim() && digitsOnly(v) !== String(v).trim()) {
+        const msg = "Invalid account number. Use digits only.";
+        setError(msg);
+        setFieldErrors({ [p]: msg });
+        showToast(msg);
+        scrollFormTop(true);
+        return false;
+      }
+
+      if (region === "local") {
+        // Local -> Individual Declaration: NIC fields are validated in the dedicated
+        // declaration validation block further below. Skipping them here prevents
+        // false "Invalid NIC" errors caused by the generic field traversal.
+        if (type === "individual" && key === "declaration" && String(p || "").startsWith("declaration.")) {
+          continue;
+        }
+
+        // Standard NIC fields
+        if (isNicKey(p) && String(v || "").trim() && !validateLocalNic(v) && !(isLocalCorporate(region, type) && key === "beneficialOwnership" && String(p).toLowerCase().includes("nicorpassport"))) {
+          const msg = "Invalid NIC.";
+          setError(msg);
+          setFieldErrors({ [p]: msg });
+
+          // Local -> Individual: validate but don't spam popup messages
+          if (!(type === "individual")) {
+            showToast(msg);
+          }
+
+          scrollFormTop(true);
+          return false;
+        }
+
+// Local Individual -> Payment Instruction idNo fields can contain NIC/..validate only when it looks like NIC
+        if (isPaymentInstructionIdNoKey(p) && looksLikeLocalNic(v) && !validateLocalNic(v)) {
+          const msg = "Invalid NIC.";
+          setError(msg);
+          showToast(msg);
+          scrollFormTop(true);
+          return false;
+        }
+      }
+
+    }
+
+
+    // Local -> Corporate validations (lightweight)
+    if (isLocalCorporate(region, type)) {
+      if (key === "clientRegistration") {
+        const c = form?.clientRegistration || {};
+        if (!c.companyName) return (setError("Company Name is required."), false);
+        // Accept any of these keys for registration number
+        const reg = (c.regNo || c.businessRegNo || c.declaration?.businessRegNo || "").trim();
+        if (!reg) return (setError("Business Registration No. is Required."), false);
+        if (!c.email) return (setError("Company Email is required."), false);
+        // Required uploads
+        if (!requireUpload(lcDirector1Sig, "lcDirector1Sig", "Please upload Specimen Signature of Director 1.")) return false;
+        if (!requireUpload(lcDirector2Sig, "lcDirector2Sig", "Please upload Specimen Signature of Director 2.")) return false;
+        if (!requireUpload(lcCompanySeal, "lcCompanySeal", "Please upload Company Seal.")) return false;
+        // If you want to make Company Registration Certificate mandatory, uncomment:
+        // if (!corpRegCert && !(isEditing && hasExisting("corpRegCert"))) return (setError("Please upload Company Registration / Incorporation Certificate."), false);
+
+      }
+      if (key === "creditFacility") {
+        const d = form?.creditFacility?.date || {};
+        const day = String(d.day || "").trim();
+        const month = String(d.month || "").trim();
+
+        if (!/^[0-9]+$/.test(day) || Number(day) < 1 || Number(day) > 31) {
+          return (setError("Credit Facility Agreement: Date must be a number between 1 and 31."), false);
+        }
+        if (!/^[0-9]+$/.test(month) || Number(month) < 1 || Number(month) > 12) {
+          return (setError("Credit Facility Agreement: Month must be a number between 1 and 12."), false);
+        }
+      }
+
+
+      if (key === "beneficialOwnership") {
+        const owners = form?.beneficialOwnership?.beneficialOwners;
+        if (!Array.isArray(owners) || owners.length === 0) {
+          return (setError("Please add at least one Beneficial Owner."), false);
+        }
+
+        // Match BOF UI schema (name, nicOrPassport, dob, currentAddress, sourceOfBeneficialOwnership, pep)
+        const isBlankOwner = (o) =>
+          !((o?.name || "").trim()) &&
+          !((o?.nicOrPassport || "").trim()) &&
+          !((o?.dob || "").trim()) &&
+          !((o?.currentAddress || "").trim()) &&
+          !((o?.sourceOfBeneficialOwnership || "").trim()) &&
+          !((o?.pep || "").trim());
+
+        const anyStarted = owners.some((o) => !isBlankOwner(o));
+        if (!anyStarted) {
+          return (setError("Please enter at least one Beneficial Owner."), false);
+        }
+
+        // Validate first started owner
+        const firstIdx = owners.findIndex((o) => !isBlankOwner(o));
+        const first = owners[firstIdx] || {};
+        if (!String(first.name || "").trim()) {
+          return (setError(`Beneficial Owner (${firstIdx + 1}): Name is required.`), false);
+        }
+        if (!String(first.nicOrPassport || "").trim()) {
+          return (setError(`Beneficial Owner (${firstIdx + 1}): NIC/Passport is required.`), false);
+        }
+      }
+
+      // Other steps can be validated later once the official documents are finalized
+      return true;
+    }
+
+    // Foreign -> Corporate validations (lightweight)
+    if (isForeignCorporate(region, type)) {
+      // if (key === "fcClientRegistration") {
+      //   const c = form?.fcClientRegistration || {};
+      //   if (!((c.companyName || "").trim())) return (setError("Company / Entity Name is required."), false);
+      //   if (!((c.countryOfIncorporation || "").trim())) return (setError("Country of Incorporation is required."), false);
+      //   if (!((c.registrationNumber || "").trim())) return (setError("Registration Number is required."), false);
+      //   if (!((c.email || "").trim())) return (setError("Email is required."), false);
+      // }
+      if (key === "fcClientRegistration") {
+  const c = form?.fcClientRegistration || {};
+
+  if (!String(c.companyName || "").trim()) {
+    return (setError("Name of Company is required."), false);
+  }
+  if (!String(c.businessRegNo || "").trim()) {
+    return (setError("Business Reg No. is required."), false);
+  }
+  if (!String(c.emailAddress || "").trim()) {
+    return (setError("Email Address is required."), false);
+  }
+  if (!String(c.registeredAddress || "").trim()) {
+    return (setError("Registered Address is required."), false);
+  }
+
+  // Required uploads for Client Registration (Foreign -> Corporate)
+  if (!requireUpload(fcDir1Sig, "fcDir1Sig", "Please upload Signature of Director 1.")) return false;
+  if (!requireUpload(fcDir2Sig, "fcDir2Sig", "Please upload Signature of Director 2.")) return false;
+  if (!requireUpload(fcCompanySeal, "fcCompanySeal", "Please upload Company Seal.")) return false;
+
+}
+
+      if (key === "fcKyc") {
+  const k = form?.fcKyc || {};
+
+  if (!String(k.natureOfBusiness || "").trim()) {
+    return (setError("KYC: Nature of the Business is required."), false);
+  }
+
+  if (!String(k.expectedInvestmentPerAnnum || "").trim()) {
+    return (setError("KYC: Please select Expected value of Investment per annum."), false);
+  }
+
+  if (!Array.isArray(k.sourceOfFunds) || k.sourceOfFunds.length === 0) {
+    return (setError("KYC: Please select at least one Source of funds."), false);
+  }
+
+  if ((k.sourceOfFunds || []).includes("Others (Specify)") && !String(k.sourceOfFundsOther || "").trim()) {
+    return (setError("KYC: Please specify 'Others' Source of funds."), false);
+  }
+
+  if (!String(k.fatcaUsPerson || "").trim()) {
+    return (setError("KYC: Please select FATCA (Yes/No)."), false);
+  }
+
+  if (k.fatcaUsPerson === "Yes" && !String(k.fatcaClarify || "").trim()) {
+    return (setError("KYC: Please clarify FATCA details."), false);
+  }
+
+  if (!String(k.pep || "").trim()) {
+    return (setError("KYC: Please select PEP (Yes/No)."), false);
+  }
+
+  if (k.pep === "Yes" && !String(k.pepClarify || "").trim()) {
+    return (setError("KYC: Please clarify PEP details."), false);
+  }
+
+  // keep authorized person lightweight (don’t block too hard)
+  const a = k.authorizedPerson || {};
+  if (!String(a.names || "").trim()) {
+    return (setError("KYC: Authorized person name/s is required."), false);
+  }
+  if (!String(a.email || "").trim()) {
+    return (setError("KYC: Authorized person email is required."), false);
+  }
+}
+
+
+      if (key === "fcBeneficialOwnership") {
+        const bof = form?.fcBeneficialOwnership || {};
+        const owners = bof.owners;
+
+        if (!Array.isArray(owners) || owners.length === 0) {
+          return (setError("Please add at least one Beneficial Owner."), false);
+        }
+
+        // Match current BOF schema: owners[{name,nicOrPassport,...}]
+        const started = owners.find(
+          (o) => String(o?.name || "").trim() || String(o?.nicOrPassport || "").trim()
+        );
+
+        if (!started) return (setError("Please enter Beneficial Owner details."), false);
+        if (!String(started.name || "").trim())
+          return (setError("Beneficial Owner Name is required."), false);
+        if (!String(started.nicOrPassport || "").trim())
+          return (setError("Beneficial Owner NIC or Passport is required."), false);
+        if (!String(started.pep || "").trim())
+          return (setError("Please select Yes/No for PEP."), false);
+      }
+
+      if (key === "fcAdditionalRequirements") {
+          return true;
+        }
+
+      return true;
+    }
+
+
+    // ---------------- clientRegistration validations ----------------
+    if (key === "clientRegistration") {
+      const p = form?.clientRegistration?.principal;
+
+      if (!p?.email) return (setError("Principal Applicant Email is required."), false);
+      if (!p?.nic) return (setError("Principal Applicant NIC is required."), false);
+
+      const jointEnabled = !!form?.clientRegistration?.jointApplicant?.enabled;
+      if (jointEnabled && !form?.clientRegistration?.jointApplicant?.nic) {
+        return (setError("Joint Applicant NIC is required."), false);
+      }
+
+      if (!requireUpload(bankProof, "bankProof", "Please upload Bank Proof.")) return false;
+      if (!requireUpload(principalSig, "principalSig", "Please upload Principal Applicant Signature.")) return false;
+
+      // ✅ jointSig + secondJointSig are OPTIONAL (no validation)
+    }
+
+    // ---------------- foreignIndividual: fiClientRegistration validations ----------------
+    if (key === "fiClientRegistration") {
+      const fi = form?.fiClientRegistration || {};
+      const fiJointEnabled = !!fi?.jointApplicant?.enabled;
+      const fiSecondJointEnabled = !!fi?.secondJointApplicant?.enabled;
+
+      // ✅ IMPORTANT CHANGE (Requested):
+      // For **Foreign -> Individual UPDATE** flow (isEditing = true), signatures are NOT mandatory.
+      // Users may upload new signatures only if they want to change them.
+      if (!isEditing) {
+        if (!requireUpload(principalSig, "principalSig", "Please upload Signature of Principal Applicant.")) return false;
+        if (fiJointEnabled && !requireUpload(jointSig, "jointSig", "Please upload Signature of Joint Applicant.")) return false;
+        if (fiSecondJointEnabled && !requireUpload(secondJointSig, "secondJointSig", "Please upload Signature of 2nd Joint Applicant.")) return false;
+      }
+
+
+      // NEW: NIC validation for "NIC of Person/s Authorises to Give Instructions"
+      const authNIC = fi?.instructionAuthorization?.authorisedNIC;
+      if (String(authNIC || "").trim() && !validateLocalNic(authNIC)) {
+        const msg = "Invalid NIC.";
+        setError(msg);
+        setFieldErrors({ [p]: msg });
+        showToast(msg);
+        scrollFormTop(true);
+        return false;
+      }
+    }
+
+// ---------------- declaration validations ----------------
+if (key === "declaration") {
+  const s1 = form?.declaration?.schedule1;
+  const s2 = form?.declaration?.schedule2;
+
+  if (!s1?.authorisedPersonFullName)
+    return (setError("Schedule 1: Authorized person full name is required."), false);
+  if (!s1?.clientNames)
+    return (setError("Schedule 1: Client name/s is required."), false);
+
+  // Signature on behalf of stockbroker firm (advisorSig upload)
+  if (!requireUpload(advisorSig, "advisorSig", "Schedule 1: Signature upload is required.")) return false;
+
+  if (!s1?.name) return (setError("Schedule 1: Name is required."), false);
+  if (!s1?.designation) return (setError("Schedule 1: Designation is required."), false);
+
+  // Local -> Individual: NIC format validation (block Next if invalid)
+  if (isLocalIndividual(region, type)) {
+    const nic1 = s1?.nicNo;
+    if (String(nic1 || "").trim() && !validateLocalNic(nic1)) {
+      const msg = "Schedule 1: Invalid NIC.";
+      setError(msg);
+      showToast(msg);
+      scrollFormTop(true);
+      return false;
+    }
+
+    const p1 = s2?.person1?.nicNo;
+    if (String(p1 || "").trim() && !validateLocalNic(p1)) {
+      const msg = "Schedule 2 (Person 1): Invalid NIC.";
+      setError(msg);
+      showToast(msg);
+      scrollFormTop(true);
+      return false;
+    }
+
+    const p2 = s2?.person2?.nicNo;
+    if (String(p2 || "").trim() && !validateLocalNic(p2)) {
+      const msg = "Schedule 2 (Person 2): Invalid NIC.";
+      setError(msg);
+      showToast(msg);
+      scrollFormTop(true);
+      return false;
+    }
+
+    const p3 = s2?.person3?.nicNo;
+    if (String(p3 || "").trim() && !validateLocalNic(p3)) {
+      const msg = "Schedule 2 (Person 3): Invalid NIC.";
+      setError(msg);
+      showToast(msg);
+      scrollFormTop(true);
+      return false;
+    }
+  }
+  if (!s1?.nicNo) return (setError("Schedule 1: NIC No is required."), false);
+  if (!s1?.date) return (setError("Schedule 1: Date is required."), false);
+
+  // Schedule 2: at least person (1) + explainedByName + date
+  if (!s2?.person1?.name || !s2?.person1?.nicNo || !s2?.person1?.address)
+    return (setError("Schedule 2: Person (1) name, NIC and address are required."), false);
+  if (!s2?.explainedByName)
+    return (setError("Schedule 2: Explained by (Name) is required."), false);
+  if (!s2?.date) return (setError("Schedule 2: Date is required."), false);
+
+  // Client signature (optional in UI right now; keep optional to avoid blocking submit)
+  // If you add a client signature upload field, you can enforce it here.
+}
+
+    
+    // ---------------- creditFacility validations ----------------
+    if (key === "creditFacility") {
+      const d1 = form?.creditFacility?.date?.day;
+      const m1 = form?.creditFacility?.date?.month;
+      const d2 = form?.creditFacility?.execution?.date;
+      const m2 = form?.creditFacility?.execution?.month;
+
+      if (!validateCFDay(d1)) {
+        const msg = "Invlid Date.";
+        setError(msg);
+        setFieldErrors({ [p]: msg });
+        showToast(msg);
+        scrollFormTop(true);
+        return false;
+      }
+      if (!validateCFMonth(m1)) {
+        const msg = "Invalid Month";
+        setError(msg);
+        setFieldErrors({ [p]: msg });
+        showToast(msg);
+        scrollFormTop(true);
+        return false;
+      }
+      if (!validateCFDay(d2)) {
+        const msg = "Invalid Date.";
+        setError(msg);
+        setFieldErrors({ [p]: msg });
+        showToast(msg);
+        scrollFormTop(true);
+        return false;
+      }
+      if (!validateCFMonth(m2)) {
+        const msg = "Invalid Month.";
+        setError(msg);
+        setFieldErrors({ [p]: msg });
+        showToast(msg);
+        scrollFormTop(true);
+        return false;
+      }
+    }
+
+    // Foreign -> Individual -> Client Agreement: Date/Month range validation
+    if (key === "fiClientAgreement") {
+      const d = String(form?.fiClientAgreement?.agreementDate?.date || "").trim();
+      const m = String(form?.fiClientAgreement?.agreementDate?.month || "").trim();
+
+      if (d) {
+        const dn = parseInt(d, 10);
+        if (Number.isNaN(dn) || dn < 1 || dn > 31) {
+          const msg = "Invalid date.";
+          setError(msg);
+          showToast(msg);
+          scrollFormTop(true);
+          return false;
+        }
+      }
+
+      if (m) {
+        const mn = parseInt(m, 10);
+        if (Number.isNaN(mn) || mn < 1 || mn > 12) {
+          const msg = "Invalid month.";
+          setError(msg);
+          showToast(msg);
+          scrollFormTop(true);
+          return false;
+        }
+      }
+    }
+
+
+// ---------------- accept checkbox steps ----------------
+    // IMPORTANT:
+    // The last step (Direction Online Form) should allow submitting once the fields
+    // are filled. In your current UI, the "accepted" checkbox isn't consistently
+    // wired, which caused the Submit button to always show "Please accept to proceed."
+    // So we DO NOT block submission based on `directionOnline.accepted` here.
+
+    return true;
+  };
+
+  const next = () => {
+    if (!validateStep()) return;
+    scrollFormTop(false);
+    setStep((s) => Math.min(total, s + 1));
+  };
+
+  const back = () => {
+    scrollFormTop(false);
+    setStep((s) => Math.max(1, s - 1));
+  };
+
+  // Clicking a step in the left panel must obey the same rules as the Next button:
+  // - You can always go back to a previous step.
+  // - You can go forward ONLY if the current (and any intermediate) steps validate.
+  const goToStep = (targetStep) => {
+    if (busy) return;
+    const t = Number(targetStep);
+    if (!Number.isFinite(t)) return;
+    const target = Math.min(Math.max(1, t), total);
+
+    if (target === step) return;
+
+    // Backward navigation is always allowed.
+    if (target < step) {
+      setError("");
+      scrollFormTop(false);
+      setStep(target);
+      return;
+    }
+
+    // Forward navigation: validate each step from current -> target-1
+    for (let s = step; s < target; s++) {
+      const k = steps?.[s - 1]?.key;
+      if (!validateStep(k)) return;
+    }
+
+    scrollFormTop(false);
+    setStep(target);
+  };
+
+  const doSubmit = async () => {
+    if (!validateStep()) return;
+    setBusy(true);
+    setError("");
+
+    try {
+      // Materialize all auto-filled/computed fields into formData before submit/update
+      // so the emailed PDF matches the UI.
+      const formForSubmit = materializeAutofillForSubmit(form, region, type);
+
+      const computedFormKey = isLocalIndividual(region, type)
+        ? "local_individual"
+        : isLocalCorporate(region, type)
+        ? "local_corporate"
+        : isForeignIndividual(region, type)
+        ? "foreign_individual"
+        : isForeignCorporate(region, type)
+        ? "foreign_corporate"
+        : "unknown";
+
+      // IMPORTANT: prune state to only the relevant steps for the selected wizard.
+      const prunedFormData = pruneFormDataForFormKey(computedFormKey, formForSubmit);
+
+      const payload = {
+        region,
+        applicantType: type,
+        formKey: computedFormKey,
+        formData: prunedFormData,
+      };
+
+      
+      const fileLabels = {
+        bankProof: "Bank Proof",
+        principalSig: "Signature of Principal Applicant",
+        jointSig: "Signature of Joint Applicant",
+        secondJointSig: "Signature of 2nd Joint Applicant",
+        clientSig: "Client Signature",
+        advisorSig: "Investment Advisor Signature",
+        corpRegCert: "Certificate of Incorporation / Business Registration",
+        kycDocs: "KYC Supporting Documents",
+        boDocs: "Beneficial Ownership Supporting Documents",
+        fcBoAuthorizedPersonSig: "FC Beneficial Ownership - Authorized Person Signature",
+        fcBoAfiSignatureSeal: "FC Beneficial Ownership - AFI Official Signature and Seal",
+        boFiSeal: "Company Seal",
+        additionalDocs: "Additional Requirements",
+        cfPrincipalSig: "Credit Facility - Client Signatory",
+        cfFirmSig: "Credit Facility - Company Signatory",
+        cfWitness1Sig: "Credit Facility - Witness 1 Signature",
+        cfWitness2Sig: "Credit Facility - Witness 2 Signature",
+        lcDirector1Sig: "Specimen Signature of Director 1",
+        lcDirector2Sig: "Specimen Signature of Director 2",
+        lcCompanySeal: "Company Seal",
+        lcPiPrincipalSig: "Payment Instruction - Principal Signature",
+        lcPiJointSig: "Payment Instruction - Joint Signature",
+        lcPiWitnessSig: "Payment Instruction - Witness / Advisor Signature",
+
+
+
+        // Foreign corporate
+        fcDir1Sig: "Signature of Director 1",
+        fcDir2Sig: "Signature of Director 2",
+        fcCompanySeal: "Company Seal",
+        fcFinalDir1Sig: "Final - Signature of Director 1",
+        fcFinalDir2Sig: "Final - Signature of Director 2",
+        fcFinalCompanySeal: "Final - Company Seal",
+        fcCertOfficerSig: "Final - Signature of Certifying Officer",
+        fcKycAuthorizedSignatorySig: "KYC - Signature of Authorized Signatory",
+        fcKycCertifyingOfficerSig: "KYC - Signature of Certifying Officer",
+        fcKycInvestmentAdvisorSig: "KYC - Signature of Investment Advisor",
+      };
+
+      const renameFile = (file, friendlyName) => {
+        if (!file) return null;
+        try {
+          if (typeof File !== "undefined" && file instanceof File) {
+            const name = String(friendlyName || "Document").trim() || "Document";
+            const original = file.name || "";
+            const extMatch = original.match(/(\.[a-zA-Z0-9]+)$/);
+            const ext = extMatch ? extMatch[1] : "";
+            return new File([file], `${name}${ext}`, { type: file.type });
+          }
+        } catch {}
+        return file;
+      };
+
+      const filesRaw = {
+        bankProof,
+        principalSig,
+        jointSig,
+        secondJointSig,
+        clientSig,
+        advisorSig,
+        corpRegCert,
+        kycDocs,
+        boDocs,
+        boFiSeal,
+        additionalDocs,
+        cfPrincipalSig,
+        cfFirmSig,
+        cfWitness1Sig,
+        cfWitness2Sig,
+        lcDirector1Sig,
+        lcDirector2Sig,
+        lcCompanySeal,
+
+        // foreign corporate
+        fcDir1Sig,
+        fcDir2Sig,
+        fcCompanySeal,
+        fcFinalDir1Sig,
+        fcFinalDir2Sig,
+        fcFinalCompanySeal,
+        fcCertOfficerSig,
+        fcKycAuthorizedSignatorySig,
+        fcKycCertifyingOfficerSig,
+        fcKycInvestmentAdvisorSig,
+        fcBoAuthorizedPersonSig,
+        fcBoAfiSignatureSeal,
+      };
+
+      const renamedFiles = Object.fromEntries(
+        Object.entries(filesRaw).map(([k, f]) => [k, renameFile(f, fileLabels[k] || k)])
+      );
+
+      const res = isEditing
+        ? await updateApplication({
+            id: editId,
+            data: payload,
+            files: renamedFiles,
+          })
+        : await submitApplication({
+            data: payload,
+            files: renamedFiles,
+          });
+
+      clearDraft(region, type);
+
+      // Store edit info locally (so user can come back within 7 days from same device/browser)
+      try {
+        if (!isEditing) {
+          const editInfo = {
+            id: res?.id,
+            region,
+            type,
+            editUntil: res?.editUntil,
+            editWindowDays: res?.editWindowDays,
+          };
+          localStorage.setItem("smartportal:lastEdit", JSON.stringify(editInfo));
+        }
+      } catch {}
+
+      window.alert(isEditing ? "Application updated successfully!" : "Application submitted successfully!");
+      nav("/success", {
+        state: {
+          id: res?.id,
+          region,
+          type,
+          editUntil: res?.editUntil,
+          editWindowDays: res?.editWindowDays,
+          updated: isEditing ? true : false,
+        },
+      });
+    } catch (e) {
+      setError(e?.message || "Submit failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const isLI = isLocalIndividual(region, type);
+  const isLC = isLocalCorporate(region, type);
+  const isFI = isForeignIndividual(region, type);
+  const isFC = isForeignCorporate(region, type);
+
+  if (!isLI && !isLC && !isFI && !isFC) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-white grid place-items-center px-6">
+        <div className="max-w-lg text-center">
+          <h1 className="text-2xl font-semibold">Flow not configured</h1>
+          <p className="mt-2 text-zinc-400">
+            Please choose Local → Individual, Local → Corporate, or Foreign → Individual.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const jointEnabled = isLI ? !!form?.clientRegistration?.jointApplicant?.enabled : false;
+  const secondJointEnabled = isLI ? !!form?.clientRegistration?.secondJointApplicant?.enabled : false;
+
+  return (
+    // Full-screen layout: keep header + stepper visible; only the form area scrolls.
+    <div
+      className={`h-screen overflow-hidden relative text-zinc-900 dark:text-white ${
+        isFormRoute ? "" : "bg-gradient-to-b from-zinc-50 via-zinc-50 to-white dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-900"
+      }`}
+      style={pageBgStyle}
+    >
+      {isFormRoute && (
+        <div className="absolute inset-0 bg-white/65 dark:bg-zinc-950/70 backdrop-blur-sm" />
+      )}
+      <div className="relative w-full h-full flex flex-col">
+        {/* Header (always visible) */}
+        {toast ? (
+          <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50">
+            <div className="rounded-2xl border border-red-900/40 bg-red-950/80 px-4 py-3 text-sm text-red-100 shadow-lg backdrop-blur">
+              {toast}
+            </div>
+          </div>
+        ) : null}
+        {/*
+          Mobile: add more top padding so the fixed menu+title header
+          doesn't overlap the progress/step card.
+        */}
+        {/*
+          Mobile: we keep the page non-scroll on desktop, but on small screens
+          we still need enough space under the fixed header (menu+title + theme toggle).
+          Slightly reduce the padding so the Step badge sits higher.
+        */}
+        <div className="px-3 sm:px-6 pt-16 sm:pt-5 pb-3 sm:pb-4">
+          <div className="flex items-center justify-end gap-4">
+            {/* Application title is now shown next to the menu icon to save vertical space */}
+            <div className="rounded-2xl border border-zinc-200 bg-white/70 px-2 sm:px-3 py-1.5 sm:py-2 shadow-soft dark:border-zinc-800 dark:bg-zinc-950/60">
+              <div className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400">Step</div>
+              <div className="text-lg sm:text-xl font-semibold">
+                {step} / {total}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 sm:mt-4 h-2 w-full rounded-full bg-zinc-200 dark:bg-zinc-800">
+            <div className="h-2 rounded-full bg-zinc-900 dark:bg-white" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+
+        {/* Body (no page scroll) */}
+        <div className="flex-1 min-h-0 px-3 sm:px-6 pb-8 overflow-y-auto overscroll-contain">
+          {/*
+            Layout note:
+            Use an explicit sidebar width on large screens so the Steps column stays narrow
+            and the form area gets maximum space.
+          */}
+          {/*
+            Make the Steps column narrower so it doesn't take too much horizontal space.
+            (You asked to reduce the left-side length of the Steps area.)
+          */}
+          <div className="grid grid-cols-1 lg:grid-cols-[180px_minmax(0,1fr)] xl:grid-cols-[200px_minmax(0,1fr)] gap-6 lg:h-full">
+          <aside>
+            <div className="rounded-3xl border border-zinc-200 bg-white/70 p-3 sticky top-6 shadow-soft backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/60">
+              <div className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Steps</div>
+              <div className="mt-4">
+                <Stepper
+                  steps={steps.map((s) => s.title)}
+                  current={step}
+                  onStepClick={goToStep}
+                />
+              </div>
+            </div>
+          </aside>
+
+          <main className="lg:h-full flex flex-col min-h-0">
+            {/* Form card (scrollable content) */}
+            <div className="rounded-3xl border border-zinc-200 bg-white/70 p-3 sm:p-5 text-[13px] sm:text-sm flex flex-col min-h-0 shadow-soft backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/60">
+              <div ref={formScrollRef} className="flex-1 min-h-0 overflow-y-auto pr-1 sm:pr-2">
+              <FormErrorProvider errors={fieldErrors}>
+
+              {error ? (
+                <div className="mb-4 rounded-2xl border border-red-400/40 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200">
+                  {error}
+                </div>
+              ) : null}
+
+              {/* ===================== CLIENT REGISTRATION ===================== */}
+              {isLocalIndividual(region, type) && currentKey === "clientRegistration" && (
+                <>
+                  <h2 className="text-lg sm:text-xl font-semibold">Client Registration</h2>
+
+                  <SectionTitle>Principal Applicant</SectionTitle>
+                  {/* <SectionTitle>Principal Applicant</SectionTitle> */}
+                  <br></br>
+                  {/* 4-column row */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <Field label="Title">
+                      <Select
+                        value={form.clientRegistration.principal.title} path="clientRegistration.principal.title"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.title", e.target.value)
+                        }
+                      >
+                        <option value="">Select</option>
+                        <option value="Mr">Mr.</option>
+                        <option value="Mrs">Mrs.</option>
+                        <option value="Ms">Ms.</option>
+                        <option value="Miss">Miss.</option>
+                        <option value="Rev">Rev.</option>
+                        <option value="Dr">Dr.</option>
+                        <option value="Prof">Prof.</option>
+                        <option value="Ven">Ven.</option>
+                      </Select>
+                    </Field>
+
+                    <Field label="Initials">
+                      <Input
+                        value={form.clientRegistration.principal.initials} path="clientRegistration.principal.initials"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.initials", e.target.value)
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Names Denoted by Initials">
+                      <Input
+                        value={form.clientRegistration.principal.namesByInitials} path="clientRegistration.principal.namesByInitials"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.namesByInitials", e.target.value)
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Surname">
+                      <Input
+                        value={form.clientRegistration.principal.surname} path="clientRegistration.principal.surname"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.surname", e.target.value)
+                        }
+                      />
+                    </Field>
+                  </div>
+
+
+                  <Grid2>
+                    {/*<Field label="Title">
+                       <Select
+                        value={form.clientRegistration.principal.title} path="clientRegistration.principal.title"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.title", e.target.value)
+                        }
+                      >
+                        <option value="">Select</option>
+                        <option value="Mr">Mr.</option>
+                        <option value="Mrs">Mrs.</option>
+                        <option value="Ms">Ms.</option>
+                        <option value="Miss">Miss.</option>
+                        <option value="Rev">Rev.</option>
+                        <option value="Dr">Dr.</option>
+                        <option value="Prof">Prof.</option>
+                        <option value="Ven">Ven.</option>
+                      </Select>
+                    </Field>
+
+                    <Field label="Initials">
+                      <Input
+                        value={form.clientRegistration.principal.initials} path="clientRegistration.principal.initials"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.initials", e.target.value)
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Names Denoted by Initials">
+                      <Input
+                        value={form.clientRegistration.principal.namesByInitials} path="clientRegistration.principal.namesByInitials"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.namesByInitials", e.target.value)
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Surname">
+                      <Input
+                        value={form.clientRegistration.principal.surname} path="clientRegistration.principal.surname"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.surname", e.target.value)
+                        }
+                      />
+                    </Field> */}
+
+                    <Field label="Telephone (Home)">
+                      <PhoneInput placeholder="" value={form.clientRegistration.principal.telephoneHome} onChange={(v) => update("clientRegistration.principal.telephoneHome", v)} /></Field>
+
+                    <Field label="Telephone (Office)">
+                      <PhoneInput placeholder="" value={form.clientRegistration.principal.telephoneOffice} onChange={(v) => update("clientRegistration.principal.telephoneOffice", v)} /></Field>
+
+                    <Field label="Mobile No.">
+                      <PhoneInput placeholder="" value={form.clientRegistration.principal.mobile} onChange={(v) => update("clientRegistration.principal.mobile", v)} /></Field>
+
+                    <Field label="Email">
+                      <Input
+                        path={"clientRegistration.principal.email"}
+                        value={form.clientRegistration.principal.email}
+                        onChange={(e) =>
+                          update("clientRegistration.principal.email", e.target.value)
+                        }
+                      />
+                    </Field>
+
+                    <ColSpan2>
+                      <Field label="Permanent Address">
+                        <Input path="clientRegistration.principal.permanentAddress"
+                          value={form.clientRegistration.principal.permanentAddress}
+                          onChange={(e) =>
+                            update(
+                              "clientRegistration.principal.permanentAddress",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </Field>
+                    </ColSpan2>
+
+                    <ColSpan2>
+                      <Field label="Correspondence Address">
+                        <Input path="clientRegistration.principal.correspondenceAddress"
+                          value={form.clientRegistration.principal.correspondenceAddress}
+                          onChange={(e) =>
+                            update(
+                              "clientRegistration.principal.correspondenceAddress",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </Field>
+                    </ColSpan2>
+
+                    <Field label="NIC">
+                      <Input
+                        value={form.clientRegistration.principal.nic} path="clientRegistration.principal.nic"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.nic", e.target.value)
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Nationality">
+                      <Input
+                        value={form.clientRegistration.principal.nationality} path="clientRegistration.principal.nationality"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.nationality", e.target.value)
+                        }
+                      />
+                    </Field>
+
+                    <Field label="NIC Date of Issue">
+                      <Input
+                        type="date"
+                        value={form.clientRegistration.principal.nicDateOfIssue} path="clientRegistration.principal.nicDateOfIssue"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.nicDateOfIssue", clampDateYear4(e.target.value))
+                        }
+                      />
+                    </Field>
+
+                    <Field label="CDS A/C Prefix">
+                      <Select
+                        value={form.clientRegistration.principal.cds.prefix} path="clientRegistration.principal.cds.prefix"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.cds.prefix", e.target.value)
+                        }
+                      >
+                        <option value="MSB">MSB</option>
+                      </Select>
+                    </Field>
+
+                    <Field label="CDS A/C No">
+                      <Input
+                        value={form.clientRegistration.principal.cds.number} path="clientRegistration.principal.cds.number"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.cds.number", e.target.value)
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Occupation">
+                      <Input
+                        value={form.clientRegistration.principal.occupation} path="clientRegistration.principal.occupation"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.occupation", e.target.value)
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Employer Address">
+                      <Input path="clientRegistration.principal.employerAddress"
+                        value={form.clientRegistration.principal.employerAddress}
+                        onChange={(e) =>
+                          update(
+                            "clientRegistration.principal.employerAddress",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Contact No">
+                      <PhoneInput placeholder="" value={form.clientRegistration.principal.contactNo} onChange={(v) => update("clientRegistration.principal.contactNo", v)} /></Field>
+
+                    <ColSpan2>
+                      <Divider />
+                    </ColSpan2>
+
+                    <ColSpan2>
+                      <div className="text-sm font-medium text-zinc-200">
+                        Bank Account Details
+                      </div>
+                    </ColSpan2>
+
+                    <Field label="Bank Name">
+                      <Input path="clientRegistration.principal.bank.bankName"
+                        value={form.clientRegistration.principal.bank.bankName}
+                        onChange={(e) =>
+                          update(
+                            "clientRegistration.principal.bank.bankName",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Branch Name">
+                      <Input path="clientRegistration.principal.bank.branchName"
+                        value={form.clientRegistration.principal.bank.branchName}
+                        onChange={(e) =>
+                          update(
+                            "clientRegistration.principal.bank.branchName",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Type of Account">
+                      <Input path="clientRegistration.principal.bank.accountType"
+                        value={form.clientRegistration.principal.bank.accountType}
+                        onChange={(e) =>
+                          update(
+                            "clientRegistration.principal.bank.accountType",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </Field>
+
+                    <Field label="A/C No">
+                      <Input path="clientRegistration.principal.bank.accountNo"
+                        value={form.clientRegistration.principal.bank.accountNo}
+                        onChange={(e) =>
+                          update(
+                            "clientRegistration.principal.bank.accountNo",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Stock Market Experience">
+                      <Input path="clientRegistration.principal.stockMarketExperience"
+                        value={form.clientRegistration.principal.stockMarketExperience}
+                        onChange={(e) =>
+                          update(
+                            "clientRegistration.principal.stockMarketExperience",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Present Brokers (if any)">
+                      <Input path="clientRegistration.principal.presentBrokers"
+                        value={form.clientRegistration.principal.presentBrokers}
+                        onChange={(e) =>
+                          update(
+                            "clientRegistration.principal.presentBrokers",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </Field>
+                  </Grid2>
+
+                  <SectionTitle className="mt-8">Investment Decisions Are To Be :</SectionTitle>
+                  <div className="mt-3 space-y-2 text-sm">
+                    <CheckRow
+                      checked={
+                        form.clientRegistration.principal.investmentDecision.discretionary
+                      }
+                      onChange={(v) =>
+                        update(
+                          "clientRegistration.principal.investmentDecision.discretionary",
+                          v
+                        )
+                      }
+                      label="Discretionary"
+                    />
+                    <CheckRow
+                      checked={
+                        form.clientRegistration.principal.investmentDecision.nonDiscretionary
+                      }
+                      onChange={(v) =>
+                        update(
+                          "clientRegistration.principal.investmentDecision.nonDiscretionary",
+                          v
+                        )
+                      }
+                      label="Non Discretionary"
+                    />
+                    <CheckRow
+                      checked={
+                        form.clientRegistration.principal.investmentDecision
+                          .fillDiscretionaryForm
+                      }
+                      onChange={(v) =>
+                        update(
+                          "clientRegistration.principal.investmentDecision.fillDiscretionaryForm",
+                          v
+                        )
+                      }
+                      label="If so please fill form of Discretionary"
+                    />
+                  </div>
+
+                  <div className="mt-4 text-sm text-zinc-300">
+                    ( A discretionary account is a CDS account that allows the investment advisor to
+                    buy and sell securities without the client's consent for each trade. The client
+                    must sign a discretionary disclosure with the broker clearly stating the investment
+                    objectives of the Client as documentation of the client's consent. )
+                  </div>
+
+                  <SectionTitle className="mt-8">
+                    Joint Applicants (Only applicable for joint applications.)
+                  </SectionTitle>
+
+                  <div className="mt-3 space-y-2">
+                    <CheckRow
+                      checked={jointEnabled}
+                      onChange={(v) => update("clientRegistration.jointApplicant.enabled", v)}
+                      label="Enable Joint Applicant"
+                    />
+                    <CheckRow
+                      checked={secondJointEnabled}
+                      onChange={(v) =>
+                        update("clientRegistration.secondJointApplicant.enabled", v)
+                      }
+                      label="Enable 2nd Joint Applicant"
+                    />
+                  </div>
+
+                  {jointEnabled && (
+                    <>
+                      <SectionTitle className="mt-6">Joint Applicant</SectionTitle>
+                      <Grid2>
+                        <Field label="Title">
+                          <Select
+                            value={form.clientRegistration.jointApplicant.title} path="clientRegistration.jointApplicant.title"
+                        onChange={(e) =>
+                          update("clientRegistration.jointApplicant.title", e.target.value)
+                            }
+                          >
+                            <option value="">Select</option>
+                            <option value="Mr">Mr.</option>
+                            <option value="Mrs">Mrs.</option>
+                            <option value="Ms">Ms.</option>
+                            <option value="Miss">Miss.</option>
+                            <option value="Rev">Rev.</option>
+                            <option value="Dr">Dr.</option>
+                            <option value="Prof">Prof.</option>
+                            <option value="Ven">Ven.</option>
+                          </Select>
+                        </Field>
+
+                        <Field label="Initials">
+                          <Input path="clientRegistration.jointApplicant.initials"
+                            value={form.clientRegistration.jointApplicant.initials}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.jointApplicant.initials",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Names Denoted by Initials">
+                          <Input path="clientRegistration.jointApplicant.namesByInitials"
+                            value={form.clientRegistration.jointApplicant.namesByInitials}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.jointApplicant.namesByInitials",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Surnames">
+                          <Input path="clientRegistration.jointApplicant.surnames"
+                            value={form.clientRegistration.jointApplicant.surnames}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.jointApplicant.surnames",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        {/* <Field label="Telephone (Home)">
+                          <Input path="clientRegistration.jointApplicant.telephoneHome"
+                            value={form.clientRegistration.jointApplicant.telephoneHome}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.jointApplicant.telephoneHome",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Telephone (Office)">
+                          <Input path="clientRegistration.jointApplicant.telephoneOffice"
+                            value={form.clientRegistration.jointApplicant.telephoneOffice}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.jointApplicant.telephoneOffice",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Mobile No.">
+                          <Input
+                            value={form.clientRegistration.jointApplicant.mobile} path="clientRegistration.jointApplicant.mobile"
+                        onChange={(e) =>
+                          update("clientRegistration.jointApplicant.mobile", e.target.value)
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Email">
+                          <Input
+                            value={form.clientRegistration.jointApplicant.email} path="clientRegistration.jointApplicant.email"
+                        onChange={(e) =>
+                          update("clientRegistration.jointApplicant.email", e.target.value)
+                            }
+                          />
+                        </Field> */}
+
+                        <Field label="Telephone (Home)">
+                          <PhoneInput placeholder="" value={form.clientRegistration.jointApplicant.telephoneHome} onChange={(v) => update("clientRegistration.jointApplicant.telephoneHome", v)} /></Field>
+
+                        <Field label="Telephone (Office)">
+                          <PhoneInput placeholder="" value={form.clientRegistration.jointApplicant.telephoneOffice} onChange={(v) => update("clientRegistration.jointApplicant.telephoneOffice", v)} /></Field>
+
+                        <Field label="Mobile No.">
+                          <PhoneInput placeholder="" value={form.clientRegistration.jointApplicant.mobile} onChange={(v) => update("clientRegistration.jointApplicant.mobile", v)} /></Field>
+
+                        <Field label="Email">
+                          <Input
+                            path={"clientRegistration.jointApplicant.email"}
+                            value={form.clientRegistration.jointApplicant.email}
+                            onChange={(e) =>
+                              update("clientRegistration.jointApplicant.email", e.target.value)
+                            }
+                          />
+                        </Field>
+
+                        <ColSpan2>
+                          <Field label="Permanent Address">
+                            <Input path="clientRegistration.jointApplicant.permanentAddress"
+                              value={form.clientRegistration.jointApplicant.permanentAddress}
+                              onChange={(e) =>
+                                update(
+                                  "clientRegistration.jointApplicant.permanentAddress",
+                                  e.target.value
+                                )
+                              }
+                            />
+                          </Field>
+                        </ColSpan2>
+
+                        <ColSpan2>
+                          <Field label="Correspondence Address">
+                            <Input path="clientRegistration.jointApplicant.correspondenceAddress"
+                              value={form.clientRegistration.jointApplicant.correspondenceAddress}
+                              onChange={(e) =>
+                                update(
+                                  "clientRegistration.jointApplicant.correspondenceAddress",
+                                  e.target.value
+                                )
+                              }
+                            />
+                          </Field>
+                        </ColSpan2>
+
+                        <Field label="NIC">
+                          <Input
+                            value={form.clientRegistration.jointApplicant.nic} path="clientRegistration.jointApplicant.nic"
+                        onChange={(e) =>
+                          update("clientRegistration.jointApplicant.nic", e.target.value)
+                            }
+                          />
+                        </Field>
+
+                        <Field label="NIC Date of Issue">
+                          <Input path="clientRegistration.jointApplicant.nicDateOfIssue"
+                            type="date"
+                            value={form.clientRegistration.jointApplicant.nicDateOfIssue}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.jointApplicant.nicDateOfIssue",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Nationality">
+                          <Input path="clientRegistration.jointApplicant.nationality"
+                            value={form.clientRegistration.jointApplicant.nationality}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.jointApplicant.nationality",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Occupation">
+                          <Input path="clientRegistration.jointApplicant.occupation"
+                            value={form.clientRegistration.jointApplicant.occupation}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.jointApplicant.occupation",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+                      </Grid2>
+                    </>
+                  )}
+
+                  {secondJointEnabled && (
+                    <>
+                      <SectionTitle className="mt-6">2nd Joint Applicant</SectionTitle>
+                      <Grid2>
+                        <Field label="Title">
+                          <Select
+                            value={form.clientRegistration.secondJointApplicant.title}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.secondJointApplicant.title",
+                                e.target.value
+                              )
+                            }
+                          >
+                            <option value="">Select</option>
+                            <option value="Mr">Mr.</option>
+                            <option value="Mrs">Mrs.</option>
+                            <option value="Ms">Ms.</option>
+                            <option value="Miss">Miss.</option>
+                            <option value="Rev">Rev.</option>
+                            <option value="Dr">Dr.</option>
+                            <option value="Prof">Prof.</option>
+                            <option value="Ven">Ven.</option>
+                          </Select>
+                        </Field>
+
+                        <Field label="Initials">
+                          <Input path="clientRegistration.secondJointApplicant.initials"
+                            value={form.clientRegistration.secondJointApplicant.initials}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.secondJointApplicant.initials",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Names Denoted by Initials">
+                          <Input path="clientRegistration.secondJointApplicant.namesByInitials"
+                            value={form.clientRegistration.secondJointApplicant.namesByInitials}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.secondJointApplicant.namesByInitials",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Surnames">
+                          <Input path="clientRegistration.secondJointApplicant.surnames"
+                            value={form.clientRegistration.secondJointApplicant.surnames}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.secondJointApplicant.surnames",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Residential Address">
+                          <Input path="clientRegistration.secondJointApplicant.residentialAddress"
+                            value={
+                              form.clientRegistration.secondJointApplicant.residentialAddress
+                            }
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.secondJointApplicant.residentialAddress",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Office Address">
+                          <Input path="clientRegistration.secondJointApplicant.officeAddress"
+                            value={form.clientRegistration.secondJointApplicant.officeAddress}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.secondJointApplicant.officeAddress",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="NIC">
+                          <Input path="clientRegistration.secondJointApplicant.nic"
+                            value={form.clientRegistration.secondJointApplicant.nic}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.secondJointApplicant.nic",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="NIC Date of Issue">
+                          <Input path="clientRegistration.secondJointApplicant.nicDateOfIssue"
+                            type="date"
+                            value={form.clientRegistration.secondJointApplicant.nicDateOfIssue}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.secondJointApplicant.nicDateOfIssue",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Nationality">
+                          <Input path="clientRegistration.secondJointApplicant.nationality"
+                            value={form.clientRegistration.secondJointApplicant.nationality}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.secondJointApplicant.nationality",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Occupation">
+                          <Input path="clientRegistration.secondJointApplicant.occupation"
+                            value={form.clientRegistration.secondJointApplicant.occupation}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.secondJointApplicant.occupation",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Telephone (Home)">
+                          <PhoneInput placeholder="" value={form.clientRegistration.secondJointApplicant.telephoneHome} onChange={(v) => update("clientRegistration.secondJointApplicant.telephoneHome", v)} /></Field>
+
+                        <Field label="Telephone (Office)">
+                          <PhoneInput placeholder="" value={form.clientRegistration.secondJointApplicant.telephoneOffice} onChange={(v) => update("clientRegistration.secondJointApplicant.telephoneOffice", v)} /></Field>
+
+                    
+
+                        {/* <Field label="Telephone (Home)">
+                          <Input path="clientRegistration.secondJointApplicant.telephoneHome"
+                            value={form.clientRegistration.secondJointApplicant.telephoneHome}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.secondJointApplicant.telephoneHome",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Telephone (Office)">
+                          <Input path="clientRegistration.secondJointApplicant.telephoneOffice"
+                            value={form.clientRegistration.secondJointApplicant.telephoneOffice}
+                            onChange={(e) =>
+                              update(
+                                "clientRegistration.secondJointApplicant.telephoneOffice",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </Field> */}
+                      </Grid2>
+                    </>
+                  )}
+
+                  <SectionTitle className="mt-8">
+                    Reference to Section 1.1 (a) of the Client Agreement of Asha Securities Limited.
+                    <br />
+                    Joint CDS Account Instructions.
+                  </SectionTitle>
+
+                  <Grid2>
+                    <Field label="CDS A/C No">
+                      <div className="flex gap-2">
+                        <Select
+                          value={form.clientRegistration.jointCdsInstructions.cdsPrefix} path="clientRegistration.jointCdsInstructions.cdsPrefix"
+                        onChange={(e) =>
+                          update("clientRegistration.jointCdsInstructions.cdsPrefix", e.target.value)}
+                          className="w-28"
+                        >
+                          <option value="MSB">MSB</option>
+                        </Select>
+
+                        <Input
+                          placeholder="Enter CDS A/C No"
+                          value={form.clientRegistration.principal.cds.number} path="clientRegistration.principal.cds.number"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.cds.number", e.target.value)}
+                        />
+                      </div>
+                    </Field>
+
+                    <Field label="Principal Holder">
+                      <Input
+                        placeholder="Enter Principal Holder"
+                        value={form.clientRegistration.principal.initials} path="clientRegistration.principal.initials"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.initials", e.target.value)}
+                      />
+                    </Field>
+
+                    <Field label="First Joint Holder (Only applicable for joint applications)">
+                      <Input
+                        placeholder="Enter First Joint Holder"
+                        value={form.clientRegistration.jointApplicant.initials} path="clientRegistration.jointApplicant.initials"
+                        onChange={(e) =>
+                          update("clientRegistration.jointApplicant.initials", e.target.value)}
+                      />
+                    </Field>
+
+                    <Field label="Second Joint Holder (Only applicable for joint applications)">
+                      <Input
+                        placeholder="Enter Second Joint Holder"
+                        value={form.clientRegistration.secondJointApplicant.initials} path="clientRegistration.secondJointApplicant.initials"
+                        onChange={(e) =>
+                          update("clientRegistration.secondJointApplicant.initials", e.target.value)}
+                      />
+                    </Field>
+
+                    <Field label="Date">
+                      <Input
+                        type="date"
+                        value={form.clientRegistration.jointCdsInstructions.date} path="clientRegistration.jointCdsInstructions.date"
+                        onChange={(e) =>
+                          update("clientRegistration.jointCdsInstructions.date", clampDateYear4(e.target.value))}
+                      />
+                    </Field>
+                  </Grid2>
+
+                  <Divider />
+
+                  <p className="mt-4 text-sm text-zinc-300">
+                    Reference to Section 1.1(a) of the Client Agreement of Asha Securities Limited. I authorize to give trading orders and settlement orders to Asha Securities Limited. I have no objection in Asha Securities Limited making payments to
+                  </p>
+
+                  <Grid2>
+                    <Field label="Enter Name of Principal Holder">
+                      <Input
+                        placeholder="Enter Name of Principal Holder"
+                        // value={form.clientRegistration.jointCdsInstructions.iName}
+                        value={form.clientRegistration.principal.initials} path="clientRegistration.jointCdsInstructions.iName"
+                        onChange={(e) =>
+                          update("clientRegistration.jointCdsInstructions.iName", e.target.value)}
+                      />
+                    </Field>
+
+                    <Field label="Enter Name of Joint Holder/s">
+                      <Input
+                        placeholder="Enter Name of Joint Holder/s"
+                        value={form.clientRegistration.jointCdsInstructions.authorizeJointName} path="clientRegistration.jointCdsInstructions.authorizeJointName"
+                        onChange={(e) =>
+                          update("clientRegistration.jointCdsInstructions.authorizeJointName", e.target.value)}
+                      />
+                    </Field>
+                  </Grid2>
+
+                  <Grid2>
+                    <Field label="Enter Name of Principal Holder">
+                      <Input
+                        placeholder="Enter Name of Principal Holder"
+                        // value={form.clientRegistration.jointCdsInstructions.iName}
+                        value={form.clientRegistration.principal.initials} path="clientRegistration.jointCdsInstructions.iName"
+                        onChange={(e) =>
+                          update("clientRegistration.jointCdsInstructions.iName", e.target.value)}
+                      />
+                    </Field>
+
+                    <Field label="Enter Name of Joint Holder/s">
+                      <Input
+                        placeholder="Enter Name of Joint Holder/s"
+                        value={form.clientRegistration.jointCdsInstructions.authorizeJointName} path="clientRegistration.jointCdsInstructions.authorizeJointName"
+                        onChange={(e) =>
+                          update("clientRegistration.jointCdsInstructions.authorizeJointName", e.target.value)}
+                      />
+                    </Field>
+                  </Grid2>
+
+                  <SectionTitle className="mt-8">
+                    Herewith attached the photocopy of bank proof for your reference.
+                  </SectionTitle>
+
+                  <div className="mt-4 grid grid-cols-1 gap-4">
+                    <FileUpload
+                      label="Bank proof (photo-copy) (required)"
+                      accept=".pdf,image/*"
+                      file={bankProof}
+                      setFile={setBankProof}
+                      path="bankProof"
+                    />
+                    <FileUpload
+                      label="Signature of Principal Applicant (required)"
+                      accept="image/*"
+                      file={principalSig}
+                      setFile={setPrincipalSig}
+                      path="principalSig"
+                    />
+
+                    {/* ✅ OPTIONAL */}
+                    {jointEnabled && (
+                      <FileUpload
+                        label="Signature of Joint Applicant (optional)"
+                        accept="image/*"
+                        file={jointSig}
+                        setFile={setJointSig}
+                      path="jointSig"
+                      />
+                    )}
+
+                    {secondJointEnabled && (
+                      <FileUpload
+                        label="Signature of 2nd Joint Applicant (optional)"
+                        accept="image/*"
+                        file={secondJointSig}
+                        setFile={setSecondJointSig}
+                      path="secondJointSig"
+                      />
+                    )}
+                  </div>
+
+                  {/* ✅ ADD THE REMAINING UI (YOUR SCREENSHOT) AFTER 2ND JOINT SIGNATURE */}
+                  <Divider />
+
+                  <SectionTitle className="mt-2">Declaration by the staff.</SectionTitle>
+
+                  {/* Row 1 */}
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
+                    <div className="md:col-span-5">
+                      <Field label="">
+                        <Input
+                          placeholder="Enter Staff Name"
+                          value={form.declaration.staffName} path="declaration.staffName"
+                        onChange={(e) =>
+                          update("declaration.staffName", e.target.value)}
+                        />
+                      </Field>
+                    </div>
+
+                    <div className="md:col-span-7 text-xs md:text-sm text-zinc-300 leading-relaxed pt-2">
+                      (Investment Advisor) on behalf of the Asha Securities Ltd has clearly explained the Risk disclosure statement to
+                      the client while inviting the client to read and ask questions and take independent advice if the client wishes.
+                    </div>
+                  </div>
+
+                  {/* Row 2 */}
+                  <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="md:col-span-5">
+                      <FileUpload
+                        label="Clients Signature (required)"
+                        accept="image/*"
+                        file={clientSig}
+                        setFile={setClientSig}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-12 gap-4">
+                    <div className="md:col-span-5">
+                      <Field label="Name of Person/s Authorises to Give Instructions">
+                        <Input
+                          placeholder="Enter Name of Person/s"
+                          value={form.declaration.authorizedPersonsName} path="declaration.authorizedPersonsName"
+                        onChange={(e) =>
+                          update("declaration.authorizedPersonsName", e.target.value)
+                          }
+                        />
+                      </Field>
+                    </div>
+
+                    <div className="md:col-span-4">
+                      <Field label="NIC of Person/s Authorises to Give Instructions">
+                        <Input
+                          placeholder="Enter NIC No"
+                          value={form.declaration.authorizedPersonsNic} path="declaration.authorizedPersonsNic"
+                        onChange={(e) =>
+                          update("declaration.authorizedPersonsNic", e.target.value)
+                          }
+                        />
+                      </Field>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 text-center text-sm font-semibold text-zinc-200">
+                    Office Use Only
+                  </div>
+
+                  {/* Row 3 */}
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-12 gap-4">
+                    <div className="md:col-span-4">
+                      <Field label="Application received on">
+                        <Input
+                          type="date"
+                          value={form.declaration?.officeUseOnly?.applicationReceivedOn ?? ""} path="declaration.officeUseOnly.applicationReceivedOn"
+                        onChange={(e) =>
+                          update("declaration.officeUseOnly.applicationReceivedOn", clampDateYear4(e.target.value))
+                          }
+                        />
+                      </Field>
+                    </div>
+
+                    <div className="md:col-span-4">
+                      <Field label="Advisor's Name">
+                        <Input
+                          placeholder="Enter Name"
+                          value={form.declaration?.officeUseOnly?.advisorsName ?? ""} path="declaration.officeUseOnly.advisorsName"
+                        onChange={(e) =>
+                          update("declaration.officeUseOnly.advisorsName", e.target.value)
+                          }
+                        />
+                      </Field>
+                    </div>
+
+                    <div className="md:col-span-4">
+                      <FileUpload
+                        label="Advisor's Signature (optional)"
+                        accept="image/*"
+                        file={advisorSig}
+                        setFile={setAdvisorSig}
+                      path="advisorSig"
+                      />
+                    </div>
+                  </div>
+
+                  <Divider />
+
+                  <div className="text-sm text-zinc-300">I/We,</div>
+
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-12 gap-4">
+                    <div className="md:col-span-6">
+                      <Field label="Name">
+                        <Input
+                          placeholder="Enter Name"
+                          // value={form.declaration?.iWe?.name ?? ""}
+                          value={form.clientRegistration.principal.initials} path="clientRegistration.principal.initials"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.initials", e.target.value)}
+                        />
+                      </Field>
+                    </div>
+
+                    <div className="md:col-span-6">
+                      <Field label="NIC No">
+                        <Input
+                          placeholder="Enter NIC No"
+                          // value={form.declaration?.iWe?.nicNo ?? ""}
+                          value={form.clientRegistration.principal.nic} path="clientRegistration.principal.nic"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.nic", e.target.value)}
+                        />
+                      </Field>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-12 gap-4">
+                    <div className="md:col-span-6">
+                      <Field label="CDS A/C No">
+                        <div className="flex gap-2">
+                          <Select
+                            value={form.declaration?.iWe?.cds?.prefix ?? ""} path="declaration.iWe.cds.prefix"
+                        onChange={(e) =>
+                          update("declaration.iWe.cds.prefix", e.target.value)
+                            }
+                            className="w-28"
+                          >
+                            <option value="MSB">MSB</option>
+                          </Select>
+
+                          <Input
+                            placeholder="Enter CDS A/C No"
+                            // value={form.declaration?.iWe?.cds?.number ?? ""}
+                            value={form.clientRegistration.principal.cds.number} path="clientRegistration.principal.cds.number"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.cds.number", e.target.value)
+                            }
+                          />
+                        </div>
+                      </Field>
+                    </div>
+
+                    <div className="md:col-span-6">
+                      <Field label="Permanent Address">
+                        <Input
+                          placeholder="Enter Address"
+                          // value={form.declaration?.iWe?.address ?? ""}
+                          value={form.clientRegistration.principal.permanentAddress} path="clientRegistration.principal.permanentAddress"
+                        onChange={(e) =>
+                          update("clientRegistration.principal.permanentAddress", e.target.value)}
+                        />
+                      </Field>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 text-xs text-zinc-400">
+                    here by declare that I / we aware of particulars given below.
+                  </div>
+
+                  <div className="mt-2 text-xs text-zinc-400 leading-relaxed">
+                    I / We undertake to operate my / our share trading account with ASHA SECURITIES
+                    LTD. (Hereinafter referred to as BROKER) in accordance with CSE Stock Broker Rule
+                    and other prevailing laws and regulations of Sri Lanka and in particular to the
+                    authority hereinafter granted by me / us to the Broker.
+                  </div>
+
+                  <div className="mt-2 text-xs text-zinc-400 leading-relaxed">
+                    In the event of my / our failure to settle the amounts due in respect of a share purchase, I / we do hereby irrevocably authorize the Broker to sell such securities involved in the default and if such proceeds are inadequate to cover the shortfall and any loss incurred by the Broker, to sell any other security in my I our portfolio held by the Broker in the Central Depository Systems (Pvt) Ltd., so that the full amount due to the Broker may be settled and any surplus arising on the sale of shares shall accrue to the Broker unless such surplus arise from the sale of other quoted shares deposited by the buyer as collateral with broker in which event the surplus shall be remitted to alter settlement day of the relevant sale (s).
+                  </div>
+
+                  <div className="mt-2 text-xs text-zinc-400 leading-relaxed">
+                    The funds to be invested for the purchase of Securities through the Securities Account to be opened with the CDS will not be funds derived from any money laundering activity or funds generated through financing of terrorist or any other illegal activity.
+                  </div>
+
+                  <div className="mt-2 text-xs text-zinc-400 leading-relaxed">
+                    In the event of a variation of any information given in the CDS Form 1, Addendum to CDS Form 1(A) this declaration and other information submitted by me / us along with the application to open a CDS Account, I/ we undertake to inform the CDS in writing within fourteen (14) days of such variation.
+                  </div>
+
+                  <div className="mt-2 text-xs text-zinc-400 leading-relaxed">
+                    Change of Broker Material Information (Ownership / Address) will be notified over public notice in printed Media.
+                  </div>
+
+                  <div className="mt-2 text-xs text-zinc-400 leading-relaxed">
+                    The irrevocable authority granted hereby shall in no way effect or exempt me / us from any liability as stated herein towards the BROKER arising from or consequent upon any such default.
+                  </div>
+
+                  <div className="mt-2 text-xs text-zinc-400 leading-relaxed">
+                    Also I / we do hereby irrevocably agree that in the event of any purchase orders placed with you for the purchase of shares, I / we shall pay approximately 50% of the value of such purchase by a legal tender which amount shall be set off against the total amount due from me I us to you on the due date of settlement in respect of such purchases, and the relevant investment advisors may be incentivized by the company on such purchase and sales turnovers.
+                  </div>
+
+                  <div className="mt-2 text-xs text-zinc-400 leading-relaxed">
+                    Any delayed payments will be subject to additional interest cost on the consideration and will be debited to my / our account. Interest percentage will be decided by the Broker considering the prevailing interest rates. (not exceeding a maximum interest rate of 0.1% per day)
+                  </div>
+
+                  <div className="mt-2 text-xs text-zinc-400 leading-relaxed">
+                    The risk disclosure statement was explained while advising independently and was invited to read and ask questions.
+                  </div>
+
+                  <div className="mt-2 text-xs text-zinc-400 leading-relaxed">
+                    Services provided: - Online Facility, Research Reports.
+                  </div>
+
+                  {/* ✅ NEW UI FROM IMAGE (DO NOT REMOVE EXISTING CODE ABOVE) */}
+                  <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <FileUpload
+                      label="Signature of Principal Applicant"
+                      accept="image/*"
+                      file={principalSig}
+                      setFile={setPrincipalSig}
+                      path="principalSig"
+                    />
+
+                    <FileUpload
+                      label="Signature of Joint Applicant"
+                      accept="image/*"
+                      file={jointSig}
+                      setFile={setJointSig}
+                      path="jointSig"
+                    />
+
+                    <FileUpload
+                      label="Signature of 2nd Joint Applicant"
+                      accept="image/*"
+                      file={secondJointSig}
+                      setFile={setSecondJointSig}
+                      path="secondJointSig"
+                    />
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Field label="Name of the Certifying Officer">
+                      <Input
+                        value={form.clientRegistration?.certifyingOfficer?.name || ""} path="clientRegistration.certifyingOfficer.name"
+                        onChange={(e) =>
+                          update("clientRegistration.certifyingOfficer.name", e.target.value)
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Signature of the Certifying Officer">
+                      <Input path="clientRegistration.certifyingOfficer.signature"
+                        value={form.clientRegistration?.certifyingOfficer?.signature || ""}
+                        onChange={(e) =>
+                          update(
+                            "clientRegistration.certifyingOfficer.signature",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Date">
+                      <Input
+                        type="date"
+                        value={form.clientRegistration?.certifyingOfficer?.date || ""} path="clientRegistration.certifyingOfficer.date"
+                        onChange={(e) =>
+                          update("clientRegistration.certifyingOfficer.date", e.target.value)
+                        }
+                      />
+                    </Field>
+                  </div>
+
+                </>
+              )}
+
+              {/* ===================== DECLARATION STEP (keep your original step too) ===================== */}
+              {currentKey === "declaration" && (
+                <>
+                  <h2 className="text-xl font-semibold">Declaration</h2>
+
+                  {/* ---------------- SCHEDULE 1 - DECLARATION ---------------- */}
+                  <div className="mt-6 text-center text-sm font-semibold text-zinc-200">
+                    SCHEDULE 1 - DECLARATION
+                  </div>
+
+                  <div className="mt-4">
+                    <Field label="Enter full name of the authorised person in block letters">
+                      <Input
+                        value={form?.declaration?.schedule1?.authorisedPersonFullName || ""} path="declaration.schedule1.authorisedPersonFullName"
+                        onChange={(e) =>
+                          update("declaration.schedule1.authorisedPersonFullName", (e.target.value || "").toUpperCase())
+                        }
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="mt-4 text-xs text-zinc-400 leading-relaxed">
+                    an employee of Asha Securities Ltd (Stockbroker Firm), who is duly authorized by the
+                    Board of Directors of the Stockbroker Firm to make declarations on its behalf hereby
+                    confirm that the following risks involved in investing/trading in securities listed on
+                    the Colombo Stock Exchange (“Risk Disclosure Statements”) were clearly explained by me to
+                  </div>
+
+                  <div className="mt-3">
+                    <Field label="Enter name/s of the client/s">
+                      <Input
+                        value={form?.declaration?.schedule1?.clientNames || ""} path="declaration.schedule1.clientNames"
+                        onChange={(e) =>
+                          update("declaration.schedule1.clientNames", e.target.value)
+                        }
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="mt-3 text-xs text-zinc-400 leading-relaxed">
+                    (the Client/s) and invited the Client/s to read the below mentioned Risk Disclosure Statements,
+                    ask questions and take independent advice if the Client/s wish/es to:
+                  </div>
+
+                  <ol className="mt-3 list-decimal pl-6 text-xs text-zinc-400 space-y-1">
+                    <li>
+                      The prices of securities fluctuate, sometimes drastically and the price of a security may
+                      depreciate in value and may even become valueless.
+                    </li>
+                    <li>
+                      It is possible that losses may be incurred rather than profits made as a result of transacting in
+                      securities.
+                    </li>
+                    <li>
+                      It is advisable to invest funds that are not required in the short term to reduce the risk of investing.
+                    </li>
+                  </ol>
+
+                  <div className="mt-6 text-xs text-zinc-400">Signed on behalf of the Stockbroker Firm by :</div>
+
+                  <div className="mt-3">
+                    <Field label="Enter name of the authorized person">
+                      <Input
+                        value={form?.declaration?.schedule1?.signedOnBehalfBy || ""} path="declaration.schedule1.signedOnBehalfBy"
+                        onChange={(e) =>
+                          update("declaration.schedule1.signedOnBehalfBy", e.target.value)
+                        }
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FileUpload
+                      label="Signature"
+                      accept="image/*,.pdf"
+                      file={advisorSig}
+                      setFile={setAdvisorSig}
+                      path="advisorSig"
+                    />
+
+                    <Field label="Name">
+                      <Input
+                        value={form?.declaration?.schedule1?.name || ""} path="declaration.schedule1.name"
+                        onChange={(e) =>
+                          update("declaration.schedule1.name", e.target.value)
+                        }
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Field label="Designation">
+                      <Input
+                        value={form?.declaration?.schedule1?.designation || ""} path="declaration.schedule1.designation"
+                        onChange={(e) =>
+                          update("declaration.schedule1.designation", e.target.value)
+                        }
+                      />
+                    </Field>
+
+                    <Field label="NIC No">
+                      <Input
+                        value={form?.declaration?.schedule1?.nicNo || ""} path="declaration.schedule1.nicNo"
+                        onChange={(e) =>
+                          update("declaration.schedule1.nicNo", e.target.value)
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Date">
+                      <Input
+                        type="date"
+                        value={form?.declaration?.schedule1?.date || ""} path="declaration.schedule1.date"
+                        onChange={(e) =>
+                          update("declaration.schedule1.date", clampDateYear4(e.target.value))
+                        }
+                      />
+                    </Field>
+                  </div>
+
+                  <Divider />
+
+                  {/* ---------------- SCHEDULE 2 - ACKNOWLEDGEMENT ---------------- */}
+                  <div className="mt-2 text-center text-sm font-semibold text-zinc-200">
+                    SCHEDULE 2 - ACKNOWLEDGEMENT
+                  </div>
+
+                  <div className="mt-4 text-xs text-zinc-400">I/We,</div>
+
+                  {/* Person (1) */}
+                  <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-950/30 p-4">
+                    <div className="text-xs text-zinc-300 mb-3">(1)</div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                      <div className="md:col-span-5">
+                        <Field label="Name">
+                          <Input
+                            value={form?.declaration?.schedule2?.person1?.name || ""} path="declaration.schedule2.person1.name"
+                        onChange={(e) =>
+                          update("declaration.schedule2.person1.name", e.target.value)
+                            }
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="md:col-span-3">
+                        <Field label="Bearing National Identity Card No">
+                          <Input
+                            value={form?.declaration?.schedule2?.person1?.nicNo || ""} path="declaration.schedule2.person1.nicNo"
+                        onChange={(e) =>
+                          update("declaration.schedule2.person1.nicNo", e.target.value)
+                            }
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="md:col-span-4">
+                        <Field label="Address">
+                          <Input
+                            value={form?.declaration?.schedule2?.person1?.address || ""} path="declaration.schedule2.person1.address"
+                        onChange={(e) =>
+                          update("declaration.schedule2.person1.address", e.target.value)
+                            }
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Person (2) */}
+                  <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-950/30 p-4">
+                    <div className="text-xs text-zinc-300 mb-3">(2) </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                      <div className="md:col-span-5">
+                        <Field label="Name">
+                          <Input
+                            value={form?.declaration?.schedule2?.person2?.name || ""} path="declaration.schedule2.person2.name"
+                        onChange={(e) =>
+                          update("declaration.schedule2.person2.name", e.target.value)
+                            }
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="md:col-span-3">
+                        <Field label="Bearing National Identity Card No">
+                          <Input
+                            value={form?.declaration?.schedule2?.person2?.nicNo || ""} path="declaration.schedule2.person2.nicNo"
+                        onChange={(e) =>
+                          update("declaration.schedule2.person2.nicNo", e.target.value)
+                            }
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="md:col-span-4">
+                        <Field label="Address">
+                          <Input
+                            value={form?.declaration?.schedule2?.person2?.address || ""} path="declaration.schedule2.person2.address"
+                        onChange={(e) =>
+                          update("declaration.schedule2.person2.address", e.target.value)
+                            }
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Person (3) */}
+                  <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-950/30 p-4">
+                    <div className="text-xs text-zinc-300 mb-3">(3)</div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                      <div className="md:col-span-5">
+                        <Field label="Name">
+                          <Input
+                            value={form?.declaration?.schedule2?.person3?.name || ""} path="declaration.schedule2.person3.name"
+                        onChange={(e) =>
+                          update("declaration.schedule2.person3.name", e.target.value)
+                            }
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="md:col-span-3">
+                        <Field label="Bearing National Identity Card No">
+                          <Input
+                            value={form?.declaration?.schedule2?.person3?.nicNo || ""} path="declaration.schedule2.person3.nicNo"
+                        onChange={(e) =>
+                          update("declaration.schedule2.person3.nicNo", e.target.value)
+                            }
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="md:col-span-4">
+                        <Field label="Address">
+                          <Input
+                            value={form?.declaration?.schedule2?.person3?.address || ""} path="declaration.schedule2.person3.address"
+                        onChange={(e) =>
+                          update("declaration.schedule2.person3.address", e.target.value)
+                            }
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 text-xs text-zinc-400 leading-relaxed">
+                    agree and acknowledge that the following risks involved in investing / trading in securities listed on the Colombo Stock Exchange ('Risk Disclosure Statements') were explained to me/ us by
+                    {/* <span className="mx-1">me to:</span> */}
+                  </div>
+
+                  <div className="mt-3">
+                    <Field label="Name">
+                      <Input
+                        value={form?.declaration?.schedule2?.explainedByName || ""} path="declaration.schedule2.explainedByName"
+                        onChange={(e) =>
+                          update("declaration.schedule2.explainedByName", e.target.value)
+                        }
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="mt-3 text-xs text-zinc-400 leading-relaxed">
+                    an employee of Asha Securities Ltd ('Stockbroker Firm') and I/we was/were invited to read the below mentioned Risk Disclosure Statements, ask questions and take independent advice if I/we wish to Additionally, I/we acknowledge that I/we understood the following Risk Disclosure Statements;
+                  </div>
+
+                  <ol className="mt-3 list-decimal pl-6 text-xs text-zinc-400 space-y-1">
+                    <li>
+                      The prices of securities fluctuate, sometimes drastically and the price of a security may
+                      depreciate in value and may even become valueless.
+                    </li>
+                    <li>
+                      It is possible that losses may be incurred rather than profits made as a result of transacting in securities.
+                    </li>
+                    <li>
+                      It is advisable to invest funds that are not required in the short term to reduce the risk of investing.
+                    </li>
+                  </ol>
+
+                  {/* Signatures row + Date (matches doc layout) */}
+                  <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <FileUpload
+                      label="Signature of Principal Applicant"
+                      accept="image/*,.pdf"
+                      file={principalSig}
+                      setFile={setPrincipalSig}
+                      path="principalSig"
+                    />
+
+                    <FileUpload
+                      label="Signature of Joint Applicant"
+                      accept="image/*,.pdf"
+                      file={jointSig}
+                      setFile={setJointSig}
+                      path="jointSig"
+                    />
+
+                    <FileUpload
+                      label="Signature of 2nd Joint Applicant"
+                      accept="image/*,.pdf"
+                      file={secondJointSig}
+                      setFile={setSecondJointSig}
+                      path="secondJointSig"
+                    />
+
+                    <Field label="Date">
+                      <Input
+                        type="date"
+                        value={form?.declaration?.schedule2?.date || ""} path="declaration.schedule2.date"
+                        onChange={(e) =>
+                          update("declaration.schedule2.date", clampDateYear4(e.target.value))
+                        }
+                      />
+                    </Field>
+                  </div>
+                </>
+              )}
+
+              {/* ===================== PLACEHOLDER STEPS ===================== */}
+
+              {/* ===================== FOREIGN -> INDIVIDUAL ===================== */}
+              {isForeignIndividual(region, type) && currentKey === "fiClientRegistration" && (
+                <ForeignIndividualClientRegistration
+                  form={form}
+                  update={update}
+                  busy={busy}
+                  bankProof={bankProof}
+                  setBankProof={setBankProof}
+
+                  // signatures (required: principal)
+                  principalSignature={principalSig}
+                  setPrincipalSignature={setPrincipalSig}
+                  jointSignature={jointSig}
+                  setJointSignature={setJointSig}
+                  secondJointSignature={secondJointSig}
+                  setSecondJointSignature={setSecondJointSig}
+                  clientsSignature={clientSig}
+                  setClientsSignature={setClientSig}
+                />
+              )}
+
+              {isForeignIndividual(region, type) && currentKey === "fiDeclaration" && (
+                <ForeignIndividualDeclaration
+                  form={form}
+                  update={update}
+                  busy={busy}
+                  principalSig={principalSig}
+                  setPrincipalSig={setPrincipalSig}
+                  jointSig={jointSig}
+                  setJointSig={setJointSig}
+                  secondJointSig={secondJointSig}
+                  setSecondJointSig={setSecondJointSig}
+                  clientSig={clientSig}
+                  setClientSig={setClientSig}
+                  advisorSig={advisorSig}
+                  setAdvisorSig={setAdvisorSig}
+                />
+              )}
+
+              {isForeignIndividual(region, type) && currentKey === "fiClientAgreement" && (
+                <ForeignIndividualClientAgreement
+                  form={form}
+                  update={update}
+                  busy={busy}
+                  principalSig={principalSig}
+                  setPrincipalSig={setPrincipalSig}
+                  jointSig={jointSig}
+                  setJointSig={setJointSig}
+                  secondJointSig={secondJointSig}
+                  setSecondJointSig={setSecondJointSig}
+                />
+              )}
+
+              {isForeignIndividual(region, type) && currentKey === "fiDirectionOnline" && (
+                <ForeignIndividualDirectionOnlineForm
+                  form={form}
+                  update={update}
+                  busy={busy}
+                  principalSig={principalSig}
+                  setPrincipalSig={setPrincipalSig}
+                  jointSig={jointSig}
+                  setJointSig={setJointSig}
+                />
+              )}
+              
+                            {isForeignCorporate(region, type) && currentKey === "fcClientRegistration" && (
+                <ForeignCorporateClientRegistration
+                  form={form}
+                  update={update}
+                  busy={busy}
+
+                  corpRegCert={corpRegCert}
+                  setCorpRegCert={setCorpRegCert}
+
+                  dir1Sig={fcDir1Sig}
+                  setDir1Sig={setFcDir1Sig}
+                  dir2Sig={fcDir2Sig}
+                  setDir2Sig={setFcDir2Sig}
+                  companySeal={fcCompanySeal}
+                  setCompanySeal={setFcCompanySeal}
+
+                  finalDir1Sig={fcFinalDir1Sig}
+                  setFinalDir1Sig={setFcFinalDir1Sig}
+                  finalDir2Sig={fcFinalDir2Sig}
+                  setFinalDir2Sig={setFcFinalDir2Sig}
+                  finalCompanySeal={fcFinalCompanySeal}
+                  setFinalCompanySeal={setFcFinalCompanySeal}
+                  certOfficerSig={fcCertOfficerSig}
+                  setCertOfficerSig={setFcCertOfficerSig}
+                />
+              )}
+
+              {isForeignCorporate(region, type) && currentKey === "fcKyc" && (
+                <ForeignCorporateKYCForm
+                  form={form}
+                  update={update}
+                  busy={busy}
+                  kycDocs={kycDocs}
+                  setKycDocs={setKycDocs}
+                  authorizedSignatorySig={fcKycAuthorizedSignatorySig}
+                  setAuthorizedSignatorySig={setFcKycAuthorizedSignatorySig}
+                  certifyingOfficerSig={fcKycCertifyingOfficerSig}
+                  setCertifyingOfficerSig={setFcKycCertifyingOfficerSig}
+                  investmentAdvisorSig={fcKycInvestmentAdvisorSig}
+                  setInvestmentAdvisorSig={setFcKycInvestmentAdvisorSig}
+                />
+              )}
+
+              {isForeignCorporate(region, type) && currentKey === "fcBeneficialOwnership" && (
+                <ForeignCorporateBeneficialOwnershipForm
+                  form={form}
+                  update={update}
+                  busy={busy}
+                  boDocs={boDocs}
+                  setBoDocs={setBoDocs}
+                  authorizedPersonSig={fcBoAuthorizedPersonSig}
+                  setAuthorizedPersonSig={setFcBoAuthorizedPersonSig}
+                  afiSignatureSeal={fcBoAfiSignatureSeal}
+                  setAfiSignatureSeal={setFcBoAfiSignatureSeal}
+                />
+              )}
+
+              {isForeignCorporate(region, type) && currentKey === "fcAdditionalRequirements" && (
+                <ForeignCorporateAdditionalRequirements
+                  form={form}
+                  update={update}
+                  busy={busy}
+                  additionalDocs={additionalDocs}
+                  setAdditionalDocs={setAdditionalDocs}
+                />
+              )}
+
+{/* ===================== CORPORATE CLIENT REGISTRATION ===================== */}
+              {isLocalCorporate(region, type) && currentKey === "clientRegistration" && (
+                <CorporateClientRegistration
+                  form={form}
+                  update={update}
+                  busy={busy}
+                  onPrev={back}
+                  onNext={next}
+
+                  director1Sig={lcDirector1Sig}
+                  setDirector1Sig={setLcDirector1Sig}
+                  director2Sig={lcDirector2Sig}
+                  setDirector2Sig={setLcDirector2Sig}
+                  companySeal={lcCompanySeal}
+                  setCompanySeal={setLcCompanySeal}
+
+                  corpRegCert={corpRegCert}
+                  setCorpRegCert={setCorpRegCert}
+                />
+              )}
+
+              {/* ===================== KYC FORM ===================== */}
+              {isLocalCorporate(region, type) && currentKey === "kyc" && (
+                <KYCForm
+                  form={form}
+                  update={update}
+                  busy={busy}
+                  onPrev={back}
+                  onNext={next}
+                  kycDocs={kycDocs}
+                  setKycDocs={setKycDocs}
+                />
+              )}
+
+              {/* ===================== BENEFICIAL OWNERSHIP FORM ===================== */}
+              {isLocalCorporate(region, type) && currentKey === "beneficialOwnership" && (
+                <BeneficialOwnershipForm
+                  form={form}
+                  update={update}
+                  busy={busy}
+                  onPrev={back}
+                  onNext={next}
+                  boDocs={boDocs}
+                  setBoDocs={setBoDocs}
+                boFiSeal={boFiSeal}
+                  setBoFiSeal={setBoFiSeal}
+                  />
+              )}
+
+              {/* ===================== ADDITIONAL REQUIREMENTS ===================== */}
+              {isLocalCorporate(region, type) && currentKey === "additionalRequirements" && (
+                <AdditionalRequirements
+                  form={form}
+                  update={update}
+                  busy={busy}
+                  onPrev={back}
+                  onNext={next}
+                  additionalDocs={additionalDocs}
+                  setAdditionalDocs={setAdditionalDocs}
+                />
+              )}
+
+              {/* ===================== CLIENT AGREEMENT (DOC STYLE) ===================== */}
+              {currentKey === "clientAgreement" && (
+                <ClientAgreement
+                  form={form}
+                  update={update}
+                  busy={busy}
+                  onPrev={back}
+                  onNext={next}
+                  jointEnabled={jointEnabled}
+                  secondJointEnabled={secondJointEnabled}
+
+                  // Applicant signatures (already in Wizard)
+                  principalSig={principalSig}
+                  setPrincipalSig={setPrincipalSig}
+                  jointSig={jointSig}
+                  setJointSig={setJointSig}
+                  secondJointSig={secondJointSig}
+                  setSecondJointSig={setSecondJointSig}
+
+                  // Broker + witnesses (NEW)
+                  agreementFirmSig={agreementFirmSig}
+                  setAgreementFirmSig={setAgreementFirmSig}
+                  agreementWitness1Sig={agreementWitness1Sig}
+                  setAgreementWitness1Sig={setAgreementWitness1Sig}
+                  agreementWitness2Sig={agreementWitness2Sig}
+                  setAgreementWitness2Sig={setAgreementWitness2Sig}
+                />
+              )}
+
+
+
+              {/* ===================== AGREEMENT - CREDIT FACILITY (DOC STYLE) ===================== */}
+              {currentKey === "creditFacility" && (
+                isLocalCorporate(region, type) ? (
+                  <CreditFacilityAgreementLocalCorporate
+                    form={form}
+                    update={update}
+                    busy={busy}
+                    onPrev={back}
+                    onNext={next}
+                    cfPrincipalSig={cfPrincipalSig}
+                    setCfPrincipalSig={setCfPrincipalSig}
+                    cfFirmSig={cfFirmSig}
+                    setCfFirmSig={setCfFirmSig}
+                    cfWitness1Sig={cfWitness1Sig}
+                    setCfWitness1Sig={setCfWitness1Sig}
+                    cfWitness2Sig={cfWitness2Sig}
+                    setCfWitness2Sig={setCfWitness2Sig}
+                  />
+                ) : (
+                  <CreditFacilityAgreementLocalIndividual
+                    form={form}
+                    update={update}
+                    busy={busy}
+                    onPrev={back}
+                    onNext={next}
+                    cfPrincipalSig={cfPrincipalSig}
+                    setCfPrincipalSig={setCfPrincipalSig}
+                    cfFirmSig={cfFirmSig}
+                    setCfFirmSig={setCfFirmSig}
+                    cfWitness1Sig={cfWitness1Sig}
+                    setCfWitness1Sig={setCfWitness1Sig}
+                    cfWitness2Sig={cfWitness2Sig}
+                    setCfWitness2Sig={setCfWitness2Sig}
+                  />
+
+                )
+              )}
+
+              {/* ===================== PAYMENT INSTRUCTION ===================== */}
+              {currentKey === "paymentInstruction" && (
+                isLocalCorporate(region, type) ? (
+                  <PaymentInstructionLocalCorporate
+                    form={form}
+                    update={update}
+                    busy={busy}
+                    onPrev={back}
+                    onNext={next}
+
+                    piPrincipalSig={lcPiPrincipalSig}
+                    setPiPrincipalSig={setLcPiPrincipalSig}
+                    piJointSig={lcPiJointSig}
+                    setPiJointSig={setLcPiJointSig}
+                    piWitnessSig={lcPiWitnessSig}
+                    setPiWitnessSig={setLcPiWitnessSig}
+                  />
+                ) : (
+                  <PaymentInstructionLocalIndividual
+                    form={form}
+                    update={update}
+                    busy={busy}
+                    onPrev={back}
+                    onNext={next}
+
+                    // IMPORTANT: use the SAME signature state from Client Registration
+                    piPrincipalSig={principalSig}
+                    setPiPrincipalSig={setPrincipalSig}
+
+                    // These 2 are required props in PaymentInstructionLocalIndividual
+                    // Add states in Step 3
+                    piJointSig={piJointSig}
+                    setPiJointSig={setPiJointSig}
+                    piWitnessSig={piWitnessSig}
+                    setPiWitnessSig={setPiWitnessSig}
+                  />
+                )
+              )}
+
+              {/* ===================== Direction Online Form And Agreement ===================== */}
+              {currentKey === "directionOnline" && (
+                <DirectionOnlineForm
+                  form={form}
+                  update={update}
+                  busy={busy}
+                  onPrev={back}
+                  onNext={doSubmit}   // or next, depending on your flow
+
+                  doPrincipalSig={principalSig}
+                  setDoPrincipalSig={setPrincipalSig}
+
+                  doJointSig={jointSig}
+                  setDoJointSig={setJointSig}
+                />
+
+              )}
+
+              {/* {["paymentInstruction", "directionOnline"].includes( */}
+              {/* {["directionOnline"].includes(
+                currentKey
+              ) && (
+                <>
+                  <h2 className="text-xl font-semibold">{steps[step - 1].title}</h2>
+                  <p className="mt-2 text-sm text-zinc-400">
+                    (Placeholder) Upload the screenshots/pages for this section and I will build every
+                    checkbox/field exactly like the form.
+                  </p>
+
+                  <label className="mt-5 flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-950/30 p-4">
+                    <input
+                      type="checkbox"
+                      checked={form[currentKey].accepted}
+                      onChange={(e) => update(`${currentKey}.accepted`, e.target.checked)}
+                    />
+                    <span className="text-sm text-zinc-200">I accept</span>
+                  </label>
+
+                  <div className="mt-4">
+                    <Field label="Notes (optional)">
+                      <Input path={`${currentKey}.notes`}
+                        value={form[currentKey].notes}
+                        onChange={(e) => update(`${currentKey}.notes`, e.target.value)}
+                        placeholder="Any notes..."
+                      />
+                    </Field>
+                  </div>
+                </>
+              )} */}
+              </FormErrorProvider>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-zinc-200 bg-white/70 p-3 shadow-soft dark:border-zinc-800 dark:bg-zinc-950/60">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={back}
+                  disabled={step === 1 || busy}
+                  className="rounded-2xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  Back
+                </button>
+
+                <button
+                  onClick={() => {
+                    clearDraft(region, type);
+                    setForm(clone(empty));
+                    setStep(1);
+                    setError("");
+                    // Reset uploads too (prevents stale required-upload validations)
+                    resetUploads();
+                    setCorpRegCert(null);
+                    setKycDocs(null);
+                    setBoDocs(null);
+                    setAdditionalDocs(null);
+                  }}
+                  disabled={busy}
+                  className="text-sm text-zinc-600 underline underline-offset-4 hover:text-zinc-900 disabled:opacity-40 dark:text-zinc-400 dark:hover:text-zinc-200"
+                >
+                  Clear saved draft for this form
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="text-xs text-zinc-600 whitespace-nowrap dark:text-zinc-400">Saved automatically</div>
+                {step < total ? (
+                  <button
+                    onClick={next}
+                    disabled={busy}
+                    className="rounded-2xl bg-white text-black px-4 py-2 text-sm font-semibold"
+                  >
+                    Next
+                  </button>
+                ) : (
+                  <button
+                    onClick={doSubmit}
+                    disabled={busy}
+                    className="rounded-2xl bg-white text-black px-4 py-2 text-sm font-semibold"
+                  >
+                    {busy ? "Submitting..." : "Submit"}
+                  </button>
+                )}
+              </div>
+            </div>
+          </main>
+        </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionTitle({ children, className = "" }) {
+  return (
+    <div className={`mt-5 text-xs font-semibold text-zinc-700 dark:text-zinc-200 ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+function Divider() {
+  return <div className="h-px bg-zinc-200 my-6 dark:bg-zinc-800" />;
+}
+
+function Grid2({ children }) {
+  return <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>;
+}
+
+function ColSpan2({ children }) {
+  return <div className="md:col-span-2">{children}</div>;
+}
+
+function CheckRow({ checked, onChange, label }) {
+  return (
+    <label className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white/70 px-4 py-3 shadow-soft dark:border-zinc-800 dark:bg-zinc-950/30">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="text-zinc-900 dark:text-zinc-200">{label}</span>
+    </label>
+  );
+}
