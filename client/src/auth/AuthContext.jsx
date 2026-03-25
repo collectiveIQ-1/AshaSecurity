@@ -2,7 +2,8 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from "
 
 // In dev we usually proxy `/api` from Vite -> backend.
 // In production (client hosted separately) set VITE_API_BASE to your backend URL.
-const API_BASE = import.meta.env.VITE_API_BASE || "";
+// const API_BASE = import.meta.env.VITE_API_BASE || "";
+const API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE || "";
 
 const AuthContext = createContext(null);
 
