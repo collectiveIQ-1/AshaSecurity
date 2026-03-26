@@ -69,7 +69,10 @@ function buildPreviewSnapshot(root, options = {}) {
   const formVariant = options.formVariant || "";
   const isForeignIndividualPreview = formVariant === "foreign_individual";
   const isLocalIndividualPreview = formVariant === "local_individual";
+  const isLocalCorporatePreview = formVariant === "local_corporate";
+  const isForeignCorporatePreview = formVariant === "foreign_corporate";
   const isIndividualPreview = isLocalIndividualPreview || isForeignIndividualPreview;
+  const isCorporatePreview = isLocalCorporatePreview || isForeignCorporatePreview;
 
   const originalControls = root.querySelectorAll("input, textarea, select");
   const cloneControls = clone.querySelectorAll("input, textarea, select");
@@ -418,6 +421,93 @@ function buildPreviewSnapshot(root, options = {}) {
   const witness1Signature = previewImageMap.witness1Signature || "";
   const witness2Signature = previewImageMap.witness2Signature || "";
   const companySealSignature = previewImageMap.companySealSignature || authorizerSignature || "";
+  const corporateAgentSignature = previewImageMap.corporateAgentSignature || "";
+  const corporateAuthorizerSignature = previewImageMap.corporateAuthorizerSignature || authorizerSignature || "";
+  const corporateStockbrokerFirmSignature = previewImageMap.corporateStockbrokerFirmSignature || "";
+  const corporatePrincipalApplicantSignature = previewImageMap.corporatePrincipalApplicantSignature || "";
+  const corporateJointApplicantSignature = previewImageMap.corporateJointApplicantSignature || "";
+  const corporateBoAuthorizedPersonSignature = previewImageMap.corporateBoAuthorizedPersonSignature || corporateAuthorizerSignature || "";
+  const corporateBoAfiSignature = previewImageMap.corporateBoAfiSignature || corporateAuthorizerSignature || corporateStockbrokerFirmSignature || "";
+
+
+  if (isCorporatePreview) {
+    const declarationCorporateCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
+      badge: "Corporate Declaration Review",
+      title: "Declaration Signatures",
+      helper: "Displayed only in preview so the corporate declaration area feels complete and easy to verify in both light and dark mode.",
+      items: [
+        { label: "Agent", imageUrl: corporateAgentSignature, alt: "Corporate agent signature preview" },
+        { label: "Advisor", imageUrl: advisorSignature, alt: "Corporate advisor signature preview" },
+        { label: "Authorizer", imageUrl: corporateAuthorizerSignature, alt: "Corporate authorizer signature preview" },
+      ],
+    });
+
+    if (declarationCorporateCard) {
+      insertBeforeTextHeading(declarationCorporateCard, ["schedule 1"], {
+        wrapperClassName: "mt-5 mb-6 md:col-span-2",
+        dataAttribute: "data-preview-corporate-declaration-signatures",
+      }) || insertBeforeTextHeading(declarationCorporateCard, ["beneficial owner details"], {
+        wrapperClassName: "mt-5 mb-6 md:col-span-2",
+        dataAttribute: "data-preview-corporate-declaration-signatures",
+      });
+    }
+
+    const schedule1CorporateCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
+      badge: "Schedule 1 Review",
+      title: "Stockbroker Firm Signatures",
+      helper: "Shown only in preview right before SCHEDULE 1 so the signed section is easier to review.",
+      items: [
+        { label: "Stockbroker Firm", imageUrl: corporateStockbrokerFirmSignature, alt: "Stockbroker firm signature preview" },
+        { label: "Witness 1", imageUrl: witness1Signature, alt: "Corporate witness 1 signature preview" },
+        { label: "Witness 2", imageUrl: witness2Signature, alt: "Corporate witness 2 signature preview" },
+      ],
+    });
+
+    if (schedule1CorporateCard) {
+      insertBeforeTextHeading(schedule1CorporateCard, ["schedule 1"], {
+        wrapperClassName: "mt-5 mb-6 md:col-span-2",
+        dataAttribute: "data-preview-corporate-schedule1-signatures",
+      });
+    }
+
+    const schedule2CorporateCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
+      badge: "Schedule 2 Review",
+      title: "Client Signatures",
+      helper: "Shown only in preview right before SCHEDULE 2 so the acknowledgement section looks polished and complete.",
+      items: [
+        { label: "Principal Applicant", imageUrl: corporatePrincipalApplicantSignature || clientSignature, alt: "Corporate principal applicant signature preview" },
+        { label: "Joint Applicant", imageUrl: corporateJointApplicantSignature, alt: "Corporate joint applicant signature preview" },
+        { label: "Company Seal", imageUrl: companySealSignature, alt: "Corporate company seal preview" },
+      ],
+    });
+
+    if (schedule2CorporateCard) {
+      insertBeforeTextHeading(schedule2CorporateCard, ["schedule 2"], {
+        wrapperClassName: "mt-5 mb-6 md:col-span-2",
+        dataAttribute: "data-preview-corporate-schedule2-signatures",
+      });
+    }
+
+    const boCorporateCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
+      badge: "Beneficial Ownership Review",
+      title: "Authorized Signatures",
+      helper: "Displayed only in preview near the Beneficial Ownership section so the signed confirmation is visible without changing your actual form layout.",
+      items: [
+        { label: "Authorized Person", imageUrl: corporateBoAuthorizedPersonSignature, alt: "Beneficial ownership authorized person signature preview" },
+        { label: "AFI Signature / Seal", imageUrl: corporateBoAfiSignature, alt: "Beneficial ownership AFI signature preview" },
+      ],
+    });
+
+    if (boCorporateCard) {
+      insertBeforeTextHeading(boCorporateCard, ["authorized financial institution official", "beneficial owner details"], {
+        wrapperClassName: "mt-5 mb-6 md:col-span-2",
+        dataAttribute: "data-preview-corporate-bo-signatures",
+      }) || insertBeforeTextHeading(boCorporateCard, ["beneficial owner details"], {
+        wrapperClassName: "mt-5 mb-6 md:col-span-2",
+        dataAttribute: "data-preview-corporate-bo-signatures",
+      });
+    }
+  }
 
   if (isIndividualPreview) {
     const privacyNoticeSignatureCard = createMultiSignaturePreviewCard(clone.ownerDocument, {
@@ -1732,6 +1822,18 @@ const steps = useMemo(
     return entry?.url || entry?.path || "";
   };
 
+  const resolvePreviewSource = (fileValue, existingField) => {
+    if (typeof fileValue === "string" && fileValue.trim()) return fileValue;
+    if (fileValue && typeof fileValue !== "string" && String(fileValue.type || "").startsWith("image/")) {
+      try {
+        return URL.createObjectURL(fileValue);
+      } catch {
+        return "";
+      }
+    }
+    return resolveExistingUploadPreviewUrl(existingField);
+  };
+
   useEffect(() => {
     if (principalSig && typeof principalSig !== "string" && String(principalSig.type || "").startsWith("image/")) {
       const url = URL.createObjectURL(principalSig);
@@ -2733,6 +2835,10 @@ if (key === "declaration") {
           ? "local_individual"
           : isForeignIndividual(region, type)
           ? "foreign_individual"
+          : isLocalCorporate(region, type)
+          ? "local_corporate"
+          : isForeignCorporate(region, type)
+          ? "foreign_corporate"
           : "",
         previewImageMap: {
           localIndividualPrincipalSignature: principalSignaturePreviewUrl,
@@ -2743,7 +2849,44 @@ if (key === "declaration") {
           advisorSignature: advisorSignaturePreviewUrl,
           witness1Signature: witness1SignaturePreviewUrl,
           witness2Signature: witness2SignaturePreviewUrl,
-          companySealSignature: authorizerSignaturePreviewUrl,
+          companySealSignature: isLocalCorporate(region, type)
+            ? resolvePreviewSource(lcCompanySeal, "lcCompanySeal")
+            : isForeignCorporate(region, type)
+            ? resolvePreviewSource(fcCompanySeal, "fcCompanySeal")
+            : authorizerSignaturePreviewUrl,
+          corporateAgentSignature: isLocalCorporate(region, type)
+            ? resolvePreviewSource(lcAgentSignature, "lcAgentSignature")
+            : "",
+          corporateAuthorizerSignature: isLocalCorporate(region, type)
+            ? resolvePreviewSource(lcAuthorizerSignature, "lcAuthorizerSignature")
+            : isForeignCorporate(region, type)
+            ? resolvePreviewSource(fcCertOfficerSig, "fcCertOfficerSig")
+            : "",
+          corporateStockbrokerFirmSignature: isLocalCorporate(region, type)
+            ? resolvePreviewSource(lcStockbrokerFirmSignature, "lcStockbrokerFirmSignature")
+            : isForeignCorporate(region, type)
+            ? resolvePreviewSource(fcCertOfficerSig, "fcCertOfficerSig")
+            : "",
+          corporatePrincipalApplicantSignature: isLocalCorporate(region, type)
+            ? resolvePreviewSource(lcPrincipalApplicantSignature, "lcPrincipalApplicantSignature")
+            : isForeignCorporate(region, type)
+            ? resolvePreviewSource(fcFinalDir1Sig, "fcFinalDir1Sig")
+            : "",
+          corporateJointApplicantSignature: isLocalCorporate(region, type)
+            ? resolvePreviewSource(lcJointApplicantSignature, "lcJointApplicantSignature")
+            : isForeignCorporate(region, type)
+            ? resolvePreviewSource(fcFinalDir2Sig, "fcFinalDir2Sig")
+            : "",
+          corporateBoAuthorizedPersonSignature: isLocalCorporate(region, type)
+            ? resolvePreviewSource(lcAuthorizerSignature, "lcAuthorizerSignature")
+            : isForeignCorporate(region, type)
+            ? resolvePreviewSource(fcBoAuthorizedPersonSig, "fcBoAuthorizedPersonSig")
+            : "",
+          corporateBoAfiSignature: isLocalCorporate(region, type)
+            ? resolvePreviewSource(lcStockbrokerFirmSignature, "lcStockbrokerFirmSignature")
+            : isForeignCorporate(region, type)
+            ? resolvePreviewSource(fcBoAfiSignatureSeal, "fcBoAfiSignatureSeal")
+            : "",
         },
       });
       setPreviewMarkup(markup);

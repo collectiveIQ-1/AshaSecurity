@@ -69,7 +69,7 @@ function LineInput({ value, onChange, placeholder, path }) {
           "bg-transparent px-1 py-0.5",
           hasError ? "border-b-2 border-orange-500 focus:border-orange-600" : "border-b border-zinc-400/70 focus:border-zinc-900",
           "outline-none transition",
-          hasError ? "text-orange-900 placeholder:text-orange-300 dark:text-orange-100" : "text-sm text-zinc-900 placeholder:text-zinc-400",
+          hasError ? "text-orange-900 placeholder:text-orange-300 dark:text-orange-100" : "text-sm text-zinc-900 placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500",
           "dark:border-zinc-500/70 dark:focus:border-zinc-200",
         ].join(" ")}
       />
